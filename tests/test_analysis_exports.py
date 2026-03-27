@@ -287,3 +287,101 @@ def test_analysis_dir_skips_ambiguous_global_call_resolution(tmp_path: Path) -> 
         if "consumer.py::function::call_ping" in reference["source_id"]
     ]
     assert not any(reference["relationship"] == "calls_resolved" for reference in call_ping_refs)
+
+
+def test_analysis_dir_resolves_relative_imports_across_package_modules(tmp_path: Path) -> None:
+    pkg_dir = tmp_path / "pkg"
+    pkg_dir.mkdir()
+    (pkg_dir / "__init__.py").write_text("", encoding="utf-8")
+    (pkg_dir / "helpers.py").write_text(
+        "\n".join(
+            [
+                "def relative_summary(value: str) -> str:",
+                '    return f"rel:{value}"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (pkg_dir / "consumer.py").write_text(
+        "\n".join(
+            [
+                "from .helpers import relative_summary",
+                "",
+                "def run() -> str:",
+                '    return relative_summary("ok")',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "pya",
+            "analyze-dir",
+            str(tmp_path),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    target_ids = {reference["target_id"] for reference in payload["bundle_references"]}
+    relationships = {reference["relationship"] for reference in payload["bundle_references"]}
+    assert any("pkg/helpers.py::function::relative_summary" in target for target in target_ids)
+    assert "imports_local" in relationships
+    assert "calls_import" in relationships
+
+
+def test_analysis_dir_resolves_star_imports_when_unambiguous(tmp_path: Path) -> None:
+    pkg_dir = tmp_path / "pkg"
+    pkg_dir.mkdir()
+    (pkg_dir / "__init__.py").write_text("", encoding="utf-8")
+    (pkg_dir / "helpers.py").write_text(
+        "\n".join(
+            [
+                "def exported_via_star() -> str:",
+                '    return "star"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "consumer.py").write_text(
+        "\n".join(
+            [
+                "from pkg.helpers import *",
+                "",
+                "def run() -> str:",
+                "    return exported_via_star()",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "pya",
+            "analyze-dir",
+            str(tmp_path),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    star_refs = [
+        reference
+        for reference in payload["bundle_references"]
+        if reference["relationship"] == "calls_import_star"
+    ]
+    assert len(star_refs) == 1
+    assert "pkg/helpers.py::function::exported_via_star" in star_refs[0]["target_id"]

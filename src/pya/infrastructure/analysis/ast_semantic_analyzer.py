@@ -81,9 +81,11 @@ class _SemanticVisitor(ast.NodeVisitor):
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         module = node.module or ""
+        module_prefix = "." * node.level
         for alias in node.names:
             name = alias.asname or alias.name
-            qualified = f"{module}.{alias.name}" if module else alias.name
+            qualified_module = f"{module_prefix}{module}" if module else module_prefix
+            qualified = f"{qualified_module}.{alias.name}" if qualified_module else alias.name
             symbol_id = self._make_symbol_id(None, name, "import")
             self._symbol_ids[f"import:{name}"] = symbol_id
             self.symbols.append(
@@ -95,10 +97,10 @@ class _SemanticVisitor(ast.NodeVisitor):
                     line=node.lineno,
                     column=node.col_offset,
                     signature=(
-                        f"from {module} import {alias.name} as {alias.asname}"
-                        if module and alias.asname
-                        else f"from {module} import {alias.name}"
-                        if module
+                        f"from {qualified_module} import {alias.name} as {alias.asname}"
+                        if qualified_module and alias.asname
+                        else f"from {qualified_module} import {alias.name}"
+                        if qualified_module
                         else f"import {alias.name}"
                     ),
                 )

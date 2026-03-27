@@ -290,9 +290,27 @@ def _resolve_bundle_references(
             for symbol in document["symbols"]
             if symbol["kind"] == "import"
         }
+        wildcard_import_targets = [
+            _normalize_target_id(
+                str(reference["target_id"]),
+                source_module=source_module,
+                source_location=source_location,
+            )
+            for reference in document["references"]
+            if str(reference["relationship"]) == "imports"
+            and any(
+                str(symbol["symbol_id"]) == str(reference["source_id"]) and str(symbol["name"]) == "*"
+                for symbol in document_symbols
+            )
+        ]
+        wildcard_import_targets = [target[:-2] for target in wildcard_import_targets if target.endswith(".*")]
 
         for reference in document["references"]:
-            target_id = str(reference["target_id"])
+            target_id = _normalize_target_id(
+                str(reference["target_id"]),
+                source_module=source_module,
+                source_location=source_location,
+            )
             resolved_target = None
             relationship = "resolves_to"
 
@@ -360,7 +378,11 @@ def _resolve_bundle_references(
                 imported_target = local_import_targets.get(call)
                 if imported_target:
                     resolved_import = _resolve_symbol_target(
-                        imported_target,
+                        _normalize_target_id(
+                            imported_target,
+                            source_module=source_module,
+                            source_location=source_location,
+                        ),
                         module_symbol_index=module_symbol_index,
                         symbol_by_name=symbol_by_name,
                         symbol_by_qualified_name=symbol_by_qualified_name,
@@ -384,7 +406,11 @@ def _resolve_bundle_references(
                     import_alias, _, member_name = call.partition(".")
                     alias_target = local_import_targets.get(import_alias)
                     if alias_target:
-                        qualified_target = f"{alias_target}.{member_name}"
+                        qualified_target = _normalize_target_id(
+                            f"{alias_target}.{member_name}",
+                            source_module=source_module,
+                            source_location=source_location,
+                        )
                         resolved_import = _resolve_symbol_target(
                             qualified_target,
                             module_symbol_index=module_symbol_index,
@@ -405,6 +431,28 @@ def _resolve_bundle_references(
                                 }
                             )
                             continue
+
+                wildcard_resolved = _resolve_from_wildcard_imports(
+                    call,
+                    wildcard_modules=wildcard_import_targets,
+                    module_symbol_index=module_symbol_index,
+                    symbol_by_name=symbol_by_name,
+                    symbol_by_qualified_name=symbol_by_qualified_name,
+                    symbol_by_id=symbol_by_id,
+                    import_target_by_symbol_id=import_target_by_symbol_id,
+                )
+                if wildcard_resolved is not None:
+                    bundle_refs.append(
+                        {
+                            "source_id": source_id,
+                            "target_id": wildcard_resolved["symbol_id"],
+                            "relationship": "calls_import_star",
+                            "location": source_location,
+                            "line": function["line"],
+                            "column": 0,
+                        }
+                    )
+                    continue
 
                 imported_source = local_import_targets.get(call)
                 if imported_source:
@@ -532,6 +580,34 @@ def _resolve_symbol_target(
     return None
 
 
+def _resolve_from_wildcard_imports(
+    symbol_name: str,
+    *,
+    wildcard_modules: list[str],
+    module_symbol_index: dict[str, dict[str, dict[str, object]]],
+    symbol_by_name: dict[str, list[dict[str, object]]],
+    symbol_by_qualified_name: dict[str, list[dict[str, object]]],
+    symbol_by_id: dict[str, dict[str, object]],
+    import_target_by_symbol_id: dict[str, str],
+) -> dict[str, object] | None:
+    candidates: list[dict[str, object]] = []
+    for module_name in wildcard_modules:
+        resolved = _resolve_symbol_target(
+            f"{module_name}.{symbol_name}",
+            module_symbol_index=module_symbol_index,
+            symbol_by_name=symbol_by_name,
+            symbol_by_qualified_name=symbol_by_qualified_name,
+            symbol_by_id=symbol_by_id,
+            import_target_by_symbol_id=import_target_by_symbol_id,
+        )
+        if resolved is not None:
+            candidates.append(resolved)
+    deduped = {str(candidate["symbol_id"]): candidate for candidate in candidates}
+    if len(deduped) == 1:
+        return next(iter(deduped.values()))
+    return None
+
+
 def _follow_reexport(
     symbol: dict[str, object],
     *,
@@ -564,3 +640,20 @@ def _module_name_from_location(source_location: str, root_path: str) -> str:
     if parts and parts[-1] == "__init__":
         parts = parts[:-1]
     return ".".join(parts)
+
+
+def _normalize_target_id(target_id: str, *, source_module: str, source_location: str) -> str:
+    if not target_id.startswith("."):
+        return target_id
+    dot_count = len(target_id) - len(target_id.lstrip("."))
+    remainder = target_id[dot_count:]
+    package_parts = source_module.split(".") if source_module else []
+    if not source_location.endswith("__init__.py") and package_parts:
+        package_parts = package_parts[:-1]
+    pops = max(dot_count - 1, 0)
+    if pops:
+        package_parts = package_parts[:-pops] if pops <= len(package_parts) else []
+    base = ".".join(part for part in package_parts if part)
+    if remainder:
+        return f"{base}.{remainder}" if base else remainder
+    return base
