@@ -600,3 +600,64 @@ def test_analysis_file_propagates_local_call_chain_return_types(tmp_path: Path) 
     assert functions["leaf"]["inferred_return_type"] == "int"
     assert functions["middle"]["inferred_return_type"] == "int"
     assert functions["top"]["inferred_return_type"] == "int"
+
+
+def test_analysis_dir_resolves_module_chain_calls_and_cross_file_binding_types(
+    tmp_path: Path,
+) -> None:
+    pkg_dir = tmp_path / "pkg"
+    pkg_dir.mkdir()
+    (pkg_dir / "__init__.py").write_text("", encoding="utf-8")
+    (pkg_dir / "tooling.py").write_text(
+        "\n".join(
+            [
+                "def build_label() -> str:",
+                '    return "bundle-label"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "consumer.py").write_text(
+        "\n".join(
+            [
+                "import pkg.tooling",
+                "",
+                "def run():",
+                "    label = pkg.tooling.build_label()",
+                "    return label",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "pya",
+            "analyze-dir",
+            str(tmp_path),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    run_refs = [
+        reference
+        for reference in payload["bundle_references"]
+        if "consumer.py::function::run" in reference["source_id"]
+    ]
+    assert any(reference["relationship"] == "calls_import" for reference in run_refs)
+    assert any("pkg/tooling.py::function::build_label" in reference["target_id"] for reference in run_refs)
+
+    consumer_doc = next(
+        document for document in payload["documents"] if document["source_location"].endswith("consumer.py")
+    )
+    functions = {function["qualified_name"]: function for function in consumer_doc["functions"]}
+    bindings = {binding["name"]: binding["inferred_type"] for binding in functions["run"]["local_bindings"]}
+    assert bindings["label"] == "str"
+    assert functions["run"]["inferred_return_type"] == "str"

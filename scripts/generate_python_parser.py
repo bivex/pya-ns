@@ -82,14 +82,28 @@ from antlr4.Lexer import Lexer
 from antlr4.Token import CommonToken, Token
 
 class Python3LexerBase(Lexer):
+    """Base class for Python3 lexer with indentation handling."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._bracket_stack = []
-        self._last_token_was_newline = False
+        self._pending_tokens = []
+        self._indents = []
+        self._opened = 0
+        self._last_token = None
+
+    def reset(self) -> None:
+        self._pending_tokens.clear()
+        self._indents.clear()
+        self._opened = 0
+        self._last_token = None
+        super().reset()
+
     def nextToken(self):
         if self._pending_tokens:
-            return self._pending_tokens.pop(0)
+            token = self._pending_tokens.pop(0)
+            if token.channel == Token.DEFAULT_CHANNEL:
+                self._last_token = token
+            return token
 
         if self._input.LA(1) == Token.EOF and self._indents:
             self._pending_tokens = [token for token in self._pending_tokens if token.type != Token.EOF]
@@ -106,7 +120,10 @@ class Python3LexerBase(Lexer):
 
         if self._pending_tokens:
             self._pending_tokens.append(next_token)
-            return self._pending_tokens.pop(0)
+            token = self._pending_tokens.pop(0)
+            if token.channel == Token.DEFAULT_CHANNEL:
+                self._last_token = token
+            return token
         return next_token
 
     def atStartOfInput(self) -> bool:
@@ -122,7 +139,13 @@ class Python3LexerBase(Lexer):
             self.DEDENT,
         }
 
-        if self._opened > 0 or (next_char in (10, 13, 35) and previous_was_layout):
+        if self._opened > 0:
+            self.skip()
+            return
+
+        if next_char in (10, 13, 35):
+            if not previous_was_layout:
+                self._emit_token(self._common_token(self.NEWLINE, new_line))
             self.skip()
             return
 

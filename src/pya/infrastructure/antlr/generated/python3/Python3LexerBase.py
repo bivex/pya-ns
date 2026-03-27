@@ -66,7 +66,13 @@ class Python3LexerBase(Lexer):
             self.DEDENT,
         }
 
-        if self._opened > 0 or (next_char in (10, 13, 35) and previous_was_layout):
+        if self._opened > 0:
+            self.skip()
+            return
+
+        if next_char in (10, 13, 35):
+            if not previous_was_layout:
+                self._emit_token(self._common_token(self.NEWLINE, new_line))
             self.skip()
             return
 

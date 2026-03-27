@@ -249,9 +249,10 @@ def _resolve_return_type_part(
         return None
 
     target_symbol_id = local_function_symbols.get(part)
-    if target_symbol_id is None and part in import_targets_by_name and import_targets_by_name[part]:
+    imported_target_id = _expand_import_target(part, import_targets_by_name)
+    if target_symbol_id is None and imported_target_id:
         resolved = _resolve_symbol_target(
-            import_targets_by_name[part],
+            imported_target_id,
             module_symbol_index=module_symbol_index,
             symbol_by_name=symbol_by_name,
             symbol_by_qualified_name=symbol_by_qualified_name,
@@ -259,19 +260,6 @@ def _resolve_return_type_part(
             import_target_by_symbol_id=import_target_by_symbol_id,
         )
         target_symbol_id = str(resolved["symbol_id"]) if resolved is not None else None
-    if target_symbol_id is None and "." in part:
-        import_alias, _, member_name = part.partition(".")
-        alias_target = import_targets_by_name.get(import_alias, "")
-        if alias_target:
-            resolved = _resolve_symbol_target(
-                f"{alias_target}.{member_name}",
-                module_symbol_index=module_symbol_index,
-                symbol_by_name=symbol_by_name,
-                symbol_by_qualified_name=symbol_by_qualified_name,
-                symbol_by_id=symbol_by_id,
-                import_target_by_symbol_id=import_target_by_symbol_id,
-            )
-            target_symbol_id = str(resolved["symbol_id"]) if resolved is not None else None
 
     if target_symbol_id is None:
         return None
@@ -299,6 +287,21 @@ def _merge_type_parts(parts: list[str]) -> str:
     if len(ordered) == 1:
         return ordered[0]
     return " | ".join(ordered)
+
+
+def _expand_import_target(name: str, import_targets_by_name: dict[str, str]) -> str:
+    direct_target = import_targets_by_name.get(name, "")
+    if direct_target:
+        return direct_target
+
+    segments = name.split(".")
+    for index in range(len(segments) - 1, 0, -1):
+        prefix = ".".join(segments[:index])
+        suffix = ".".join(segments[index:])
+        target = import_targets_by_name.get(prefix, "")
+        if target:
+            return f"{target}.{suffix}" if suffix else target
+    return ""
 
 
 def _propagate_bundle_return_types(
@@ -389,13 +392,10 @@ def _propagate_bundle_return_types(
             for function in document["functions"]:
                 current_type = function.get("inferred_return_type")
                 if not isinstance(current_type, str) or not current_type.strip():
-                    continue
-                parts = [part.strip() for part in current_type.split("|")]
-                updated_parts: list[str] = []
-                part_changed = False
-                for part in parts:
-                    replacement = _resolve_return_type_part(
-                        part=part,
+                    binding_changed = False
+                else:
+                    merged, binding_changed = _resolve_inferred_type(
+                        current_type,
                         import_targets_by_name=import_targets_by_name,
                         local_function_symbols=local_function_symbols,
                         module_symbol_index=module_symbol_index,
@@ -405,13 +405,61 @@ def _propagate_bundle_return_types(
                         import_target_by_symbol_id=import_target_by_symbol_id,
                         function_payload_by_symbol_id=function_payload_by_symbol_id,
                     )
-                    updated_parts.append(replacement or part)
-                    part_changed = part_changed or replacement is not None
-                merged = _merge_type_parts(updated_parts)
-                if part_changed and merged != current_type:
-                    function["inferred_return_type"] = merged
-                    changed = True
+                    if binding_changed and merged != current_type:
+                        function["inferred_return_type"] = merged
+                        changed = True
+
+                for binding in function.get("local_bindings", []):
+                    inferred_type = binding.get("inferred_type")
+                    if not isinstance(inferred_type, str) or not inferred_type.strip():
+                        continue
+                    merged, binding_changed = _resolve_inferred_type(
+                        inferred_type,
+                        import_targets_by_name=import_targets_by_name,
+                        local_function_symbols=local_function_symbols,
+                        module_symbol_index=module_symbol_index,
+                        symbol_by_name=symbol_by_name,
+                        symbol_by_qualified_name=symbol_by_qualified_name,
+                        symbol_by_id=symbol_by_id,
+                        import_target_by_symbol_id=import_target_by_symbol_id,
+                        function_payload_by_symbol_id=function_payload_by_symbol_id,
+                    )
+                    if binding_changed and merged != inferred_type:
+                        binding["inferred_type"] = merged
+                        changed = True
     return documents
+
+
+def _resolve_inferred_type(
+    current_type: str,
+    *,
+    import_targets_by_name: dict[str, str],
+    local_function_symbols: dict[str, str],
+    module_symbol_index: dict[str, dict[str, dict[str, object]]],
+    symbol_by_name: dict[str, list[dict[str, object]]],
+    symbol_by_qualified_name: dict[str, list[dict[str, object]]],
+    symbol_by_id: dict[str, dict[str, object]],
+    import_target_by_symbol_id: dict[str, str],
+    function_payload_by_symbol_id: dict[str, dict[str, object]],
+) -> tuple[str, bool]:
+    parts = [part.strip() for part in current_type.split("|")]
+    updated_parts: list[str] = []
+    changed = False
+    for part in parts:
+        replacement = _resolve_return_type_part(
+            part=part,
+            import_targets_by_name=import_targets_by_name,
+            local_function_symbols=local_function_symbols,
+            module_symbol_index=module_symbol_index,
+            symbol_by_name=symbol_by_name,
+            symbol_by_qualified_name=symbol_by_qualified_name,
+            symbol_by_id=symbol_by_id,
+            import_target_by_symbol_id=import_target_by_symbol_id,
+            function_payload_by_symbol_id=function_payload_by_symbol_id,
+        )
+        updated_parts.append(replacement or part)
+        changed = changed or replacement is not None
+    return _merge_type_parts(updated_parts), changed
 
 
 def _resolve_bundle_references(
@@ -589,35 +637,33 @@ def _resolve_bundle_references(
                         )
                         continue
 
-                if "." in call:
-                    import_alias, _, member_name = call.partition(".")
-                    alias_target = local_import_targets.get(import_alias)
-                    if alias_target:
-                        qualified_target = _normalize_target_id(
-                            f"{alias_target}.{member_name}",
-                            source_module=source_module,
-                            source_location=source_location,
+                expanded_import_target = _expand_import_target(call, local_import_targets)
+                if expanded_import_target:
+                    qualified_target = _normalize_target_id(
+                        expanded_import_target,
+                        source_module=source_module,
+                        source_location=source_location,
+                    )
+                    resolved_import = _resolve_symbol_target(
+                        qualified_target,
+                        module_symbol_index=module_symbol_index,
+                        symbol_by_name=symbol_by_name,
+                        symbol_by_qualified_name=symbol_by_qualified_name,
+                        symbol_by_id=symbol_by_id,
+                        import_target_by_symbol_id=import_target_by_symbol_id,
+                    )
+                    if resolved_import is not None:
+                        bundle_refs.append(
+                            {
+                                "source_id": source_id,
+                                "target_id": resolved_import["symbol_id"],
+                                "relationship": "calls_import",
+                                "location": source_location,
+                                "line": function["line"],
+                                "column": 0,
+                            }
                         )
-                        resolved_import = _resolve_symbol_target(
-                            qualified_target,
-                            module_symbol_index=module_symbol_index,
-                            symbol_by_name=symbol_by_name,
-                            symbol_by_qualified_name=symbol_by_qualified_name,
-                            symbol_by_id=symbol_by_id,
-                            import_target_by_symbol_id=import_target_by_symbol_id,
-                        )
-                        if resolved_import is not None:
-                            bundle_refs.append(
-                                {
-                                    "source_id": source_id,
-                                    "target_id": resolved_import["symbol_id"],
-                                    "relationship": "calls_import",
-                                    "location": source_location,
-                                    "line": function["line"],
-                                    "column": 0,
-                                }
-                            )
-                            continue
+                        continue
 
                 wildcard_resolved = _resolve_from_wildcard_imports(
                     call,

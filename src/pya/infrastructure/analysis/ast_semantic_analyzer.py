@@ -242,7 +242,17 @@ class _SemanticVisitor(ast.NodeVisitor):
         return list(dict.fromkeys(self._module_exports))
 
     def _infer_type(self, node: ast.AST | None) -> str | None:
-        return _infer_type(node, declared_returns=self._declared_returns)
+        current_bindings = None
+        if self._function_stack:
+            current_bindings = {
+                binding.name: binding.inferred_type
+                for binding in self._bindings[self._function_stack[-1].qualified_name]
+            }
+        return _infer_type(
+            node,
+            declared_returns=self._declared_returns,
+            current_bindings=current_bindings,
+        )
 
     def _resolved_return_types(self) -> dict[str, str | None]:
         resolved = {
@@ -349,11 +359,14 @@ def _infer_type(
     node: ast.AST | None,
     *,
     declared_returns: dict[str, str] | None = None,
+    current_bindings: dict[str, str] | None = None,
 ) -> str | None:
     if node is None:
         return "None"
     if isinstance(node, ast.Constant):
         return type(node.value).__name__
+    if isinstance(node, ast.Name) and current_bindings:
+        return current_bindings.get(node.id)
     if isinstance(node, ast.JoinedStr):
         return "str"
     if isinstance(node, ast.List):
@@ -373,14 +386,30 @@ def _infer_type(
     if isinstance(node, ast.Await):
         return _infer_type(node.value, declared_returns=declared_returns)
     if isinstance(node, ast.IfExp):
-        left = _infer_type(node.body, declared_returns=declared_returns)
-        right = _infer_type(node.orelse, declared_returns=declared_returns)
+        left = _infer_type(
+            node.body,
+            declared_returns=declared_returns,
+            current_bindings=current_bindings,
+        )
+        right = _infer_type(
+            node.orelse,
+            declared_returns=declared_returns,
+            current_bindings=current_bindings,
+        )
         if left and right:
             return left if left == right else f"{left} | {right}"
         return left or right
     if isinstance(node, ast.BinOp):
-        left = _infer_type(node.left, declared_returns=declared_returns)
-        right = _infer_type(node.right, declared_returns=declared_returns)
+        left = _infer_type(
+            node.left,
+            declared_returns=declared_returns,
+            current_bindings=current_bindings,
+        )
+        right = _infer_type(
+            node.right,
+            declared_returns=declared_returns,
+            current_bindings=current_bindings,
+        )
         if left == right and left in {"int", "float", "str"}:
             return left
         if {left, right} == {"int", "float"}:
