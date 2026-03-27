@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Sequence
 
+from pya.domain.analysis import SemanticAnalysis
 from pya.domain.control_flow import ControlFlowDiagram
 from pya.domain.events import DomainEvent
 from pya.domain.model import GrammarVersion, ParseOutcome, ParsingJob, SourceUnit
@@ -47,6 +48,12 @@ class PythonControlFlowExtractor(ABC):
 class NassiDiagramRenderer(ABC):
     @abstractmethod
     def render(self, diagram: ControlFlowDiagram) -> str:
+        raise NotImplementedError
+
+
+class PythonSemanticAnalyzer(ABC):
+    @abstractmethod
+    def analyze(self, source_unit: SourceUnit) -> SemanticAnalysis:
         raise NotImplementedError
 
 

@@ -196,13 +196,19 @@ class HtmlNassiDiagramRenderer(NassiDiagramRenderer):
         box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
         overflow: hidden;
       }}
+      .function-panel[open] {{ display: block; }}
       .function-panel:last-child {{ margin-bottom: 0; }}
       .function-head {{
+        list-style: none;
         padding: 12px 16px;
         background:
           linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)),
           var(--surface-3);
         border-bottom: 1px solid var(--border-strong);
+        cursor: pointer;
+      }}
+      .function-head::-webkit-details-marker {{
+        display: none;
       }}
       .function-title {{
         font-size: 15px;
@@ -492,6 +498,16 @@ class HtmlNassiDiagramRenderer(NassiDiagramRenderer):
         padding: 24px;
         color: var(--muted);
       }}
+      .collapse-toggle {{
+        margin-left: auto;
+        font-size: 11px;
+        color: var(--blue);
+      }}
+      .function-head-row {{
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }}
 
       @media (max-width: 800px) {{
         body {{ padding: 12px; }}
@@ -535,21 +551,34 @@ class HtmlNassiDiagramRenderer(NassiDiagramRenderer):
       </div>
       <main class="viewer-body">{sections}</main>
     </div>
+    <script>
+      document.querySelectorAll("details.function-panel").forEach((panel) => {{
+        panel.addEventListener("toggle", () => {{
+          const toggle = panel.querySelector(".collapse-toggle");
+          if (toggle) {{
+            toggle.textContent = panel.open ? "Collapse" : "Expand";
+          }}
+        }});
+      }});
+    </script>
   </body>
 </html>
 """
 
     def _render_function(self, function) -> str:
         return (
-            '<section class="function-panel">'
-            '<div class="function-head">'
+            '<details class="function-panel" open>'
+            '<summary class="function-head">'
+            '<div class="function-head-row">'
             f'<h2 class="function-title">{escape(function.qualified_name)}</h2>'
-            f'<div class="function-signature">{escape(function.signature)}</div>'
+            '<span class="collapse-toggle">Collapse</span>'
             "</div>"
+            f'<div class="function-signature">{escape(function.signature)}</div>'
+            "</summary>"
             '<div class="function-body">'
             f"{self._render_sequence(function.steps, depth=0)}"
             "</div>"
-            "</section>"
+            "</details>"
         )
 
     def _render_sequence(self, steps: tuple[ControlFlowStep, ...], *, depth: int) -> str:

@@ -39,3 +39,7 @@ class SourceAccessError(PyaError):
 
 class GeneratedParserNotAvailableError(PyaError):
     """Raised when generated ANTLR artifacts are missing."""
+
+
+class ExportError(PyaError):
+    """Raised when a requested export cannot be produced."""

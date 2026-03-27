@@ -15,10 +15,12 @@ from pya.domain.control_flow import (
     ForInFlowStep,
     FunctionControlFlow,
     IfFlowStep,
+    SwitchFlowStep,
 )
 from pya.domain.model import SourceUnit, SourceUnitId
 from pya.infrastructure.antlr.control_flow_extractor import AntlrPythonControlFlowExtractor
 from pya.infrastructure.filesystem.source_repository import FileSystemSourceRepository
+from pya.infrastructure.rendering.diagram_exporter import DiagramExporter
 from pya.infrastructure.rendering.nassi_html_renderer import HtmlNassiDiagramRenderer
 
 
@@ -85,6 +87,43 @@ class Direction:
     assert document.function_count == 1
     assert document.function_names == ("Direction.score",)
     assert "Direction" in document.html
+
+
+def test_match_case_is_extracted_as_switch_flow() -> None:
+    _ensure_generated_parser()
+    repository = FileSystemSourceRepository()
+    extractor = AntlrPythonControlFlowExtractor()
+    diagram = extractor.extract(repository.load_file(str(ROOT / "tests" / "fixtures" / "control_flow.py")))
+
+    match_case_function = next(function for function in diagram.functions if function.name == "match_case")
+    assert any(isinstance(step, SwitchFlowStep) for step in match_case_function.steps)
+
+
+def test_html_diagram_is_interactive() -> None:
+    service = _build_service()
+    document = service.build_file_diagram(
+        BuildNassiDiagramCommand(path=str(ROOT / "tests" / "fixtures" / "control_flow.py"))
+    )
+
+    assert "<details class=\"function-panel\" open>" in document.html
+    assert "Collapse" in document.html
+    assert "panel.addEventListener(\"toggle\"" in document.html
+
+
+def test_mermaid_and_svg_exports_are_available() -> None:
+    service = _build_service()
+    exporter = DiagramExporter()
+    diagram = service.extractor.extract(
+        service.source_repository.load_file(str(ROOT / "tests" / "fixtures" / "control_flow.py"))
+    )
+
+    mermaid = exporter.render_mermaid(diagram)
+    svg = exporter.render_svg(diagram)
+
+    assert mermaid.startswith("flowchart TD")
+    assert "match value" in mermaid
+    assert svg.startswith("<svg")
+    assert "Function: match_case" in svg
 
 
 # ---------------------------------------------------------------------------

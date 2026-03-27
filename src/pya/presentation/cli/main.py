@@ -9,6 +9,11 @@ from dataclasses import dataclass
 from html import escape
 from pathlib import Path
 
+from pya.application.analysis import (
+    AnalyzeDirectoryCommand,
+    AnalyzeFileCommand,
+    SemanticAnalysisService,
+)
 from pya.application.control_flow import (
     BuildNassiDiagramCommand,
     BuildNassiDirectoryCommand,
@@ -18,9 +23,13 @@ from pya.application.control_flow import (
 from pya.application.dto import ParseDirectoryCommand, ParseFileCommand, ParsingJobReportDTO
 from pya.application.use_cases import ParsingJobService
 from pya.domain.errors import PyaError
+from pya.infrastructure.analysis.adapters import to_cytoscape, to_graphviz_dot
+from pya.infrastructure.analysis.ast_semantic_analyzer import AstPythonSemanticAnalyzer
 from pya.infrastructure.antlr.control_flow_extractor import AntlrPythonControlFlowExtractor
 from pya.infrastructure.antlr.parser_adapter import AntlrPythonSyntaxParser
+from pya.infrastructure.cached_parser import CachedPythonSyntaxParser
 from pya.infrastructure.filesystem.source_repository import FileSystemSourceRepository
+from pya.infrastructure.rendering.diagram_exporter import DiagramExporter
 from pya.infrastructure.rendering.nassi_html_renderer import HtmlNassiDiagramRenderer
 from pya.infrastructure.system import (
     InMemoryParsingJobRepository,
@@ -38,19 +47,35 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "parse-file":
-            report = _build_parse_service().parse_file(ParseFileCommand(path=args.path))
+            report = _build_parse_service(cache_dir=getattr(args, "cache_dir", None)).parse_file(
+                ParseFileCommand(path=args.path)
+            )
         elif args.command == "parse-dir":
-            report = _build_parse_service().parse_directory(ParseDirectoryCommand(root_path=args.path))
+            report = _build_parse_service(cache_dir=getattr(args, "cache_dir", None)).parse_directory(
+                ParseDirectoryCommand(root_path=args.path)
+            )
+        elif args.command == "analyze-file":
+            document = _build_analysis_service().analyze_file(AnalyzeFileCommand(path=args.path))
+            return _emit_analysis_payload(document.payload, args.adapter)
+        elif args.command == "analyze-dir":
+            bundle = _build_analysis_service().analyze_directory(
+                AnalyzeDirectoryCommand(root_path=args.path)
+            )
+            return _emit_analysis_payload(bundle.payload, args.adapter)
         elif args.command == "nassi-file":
-            document = _build_nassi_service().build_file_diagram(
+            nassi_service = _build_nassi_service()
+            document = nassi_service.build_file_diagram(
                 BuildNassiDiagramCommand(path=args.path)
             )
-            output_path = _resolve_output_path(args.path, args.out)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(document.html, encoding="utf-8")
+            diagram = nassi_service.extractor.extract(
+                nassi_service.source_repository.load_file(args.path)
+            )
+            output_path = _resolve_output_path(args.path, args.out, args.format)
+            _write_diagram_output(output_path, args.format, document.html, diagram)
 
             payload = document.to_dict()
             payload["output_path"] = str(output_path)
+            payload["format"] = args.format
             print(json.dumps(payload, indent=2))
             return 0
         elif args.command == "nassi-dir":
@@ -97,9 +122,43 @@ def _build_argument_parser() -> argparse.ArgumentParser:
 
     parse_file = subparsers.add_parser("parse-file", help="Parse one Python file.")
     parse_file.add_argument("path", help="Path to a .py file.")
+    parse_file.add_argument(
+        "--cache-dir",
+        default=".pya-cache",
+        help="Cache directory for content-addressed parse results.",
+    )
 
     parse_dir = subparsers.add_parser("parse-dir", help="Parse all Python files in a directory.")
     parse_dir.add_argument("path", help="Path to a directory.")
+    parse_dir.add_argument(
+        "--cache-dir",
+        default=".pya-cache",
+        help="Cache directory for content-addressed parse results.",
+    )
+
+    analyze_file = subparsers.add_parser(
+        "analyze-file",
+        help="Export symbols, cross-references, type hints, and call graph data for one file.",
+    )
+    analyze_file.add_argument("path", help="Path to a .py file.")
+    analyze_file.add_argument(
+        "--adapter",
+        choices=("json", "cytoscape", "graphviz-dot"),
+        default="json",
+        help="Output format for external analysis tools.",
+    )
+
+    analyze_dir = subparsers.add_parser(
+        "analyze-dir",
+        help="Export symbols, cross-references, type hints, and call graph data for a directory.",
+    )
+    analyze_dir.add_argument("path", help="Path to a directory.")
+    analyze_dir.add_argument(
+        "--adapter",
+        choices=("json", "cytoscape", "graphviz-dot"),
+        default="json",
+        help="Output format for external analysis tools.",
+    )
 
     nassi_file = subparsers.add_parser(
         "nassi-file",
@@ -107,8 +166,14 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     )
     nassi_file.add_argument("path", help="Path to a .py file.")
     nassi_file.add_argument(
+        "--format",
+        choices=("html", "mermaid", "svg", "png"),
+        default="html",
+        help="Output diagram format.",
+    )
+    nassi_file.add_argument(
         "--out",
-        help="Output HTML path. Defaults to <input>.nassi.html.",
+        help="Output path. Defaults to <input>.nassi.<ext>.",
     )
 
     nassi_dir = subparsers.add_parser(
@@ -123,10 +188,13 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _build_parse_service() -> ParsingJobService:
+def _build_parse_service(*, cache_dir: str | None = None) -> ParsingJobService:
+    parser = AntlrPythonSyntaxParser()
+    if cache_dir:
+        parser = CachedPythonSyntaxParser(parser, cache_dir)
     return ParsingJobService(
         source_repository=FileSystemSourceRepository(),
-        parser=AntlrPythonSyntaxParser(),
+        parser=parser,
         event_publisher=StructuredLoggingEventPublisher(),
         clock=SystemClock(),
         job_repository=InMemoryParsingJobRepository(),
@@ -141,18 +209,35 @@ def _build_nassi_service() -> NassiDiagramService:
     )
 
 
+def _build_analysis_service() -> SemanticAnalysisService:
+    return SemanticAnalysisService(
+        source_repository=FileSystemSourceRepository(),
+        analyzer=AstPythonSemanticAnalyzer(),
+    )
+
+
 def _exit_code_for(report: ParsingJobReportDTO) -> int:
     if report.summary.technical_failure_count > 0:
         return 1
     return 0
 
 
-def _resolve_output_path(input_path: str, explicit_output_path: str | None) -> Path:
+def _resolve_output_path(
+    input_path: str,
+    explicit_output_path: str | None,
+    export_format: str = "html",
+) -> Path:
     if explicit_output_path:
         return Path(explicit_output_path).expanduser().resolve()
 
     resolved_input = Path(input_path).expanduser().resolve()
-    return resolved_input.with_suffix(".nassi.html")
+    suffix = {
+        "html": ".nassi.html",
+        "mermaid": ".nassi.mmd",
+        "svg": ".nassi.svg",
+        "png": ".nassi.png",
+    }[export_format]
+    return resolved_input.with_suffix(suffix)
 
 
 def _resolve_output_directory(input_path: str, explicit_output_path: str | None) -> Path:
@@ -348,6 +433,43 @@ def _render_directory_index(
   </body>
 </html>
 """
+
+
+def _emit_analysis_payload(payload: dict[str, object], adapter: str) -> int:
+    if adapter == "json":
+        print(json.dumps(payload, indent=2))
+        return 0
+    if adapter == "cytoscape":
+        print(json.dumps(to_cytoscape(payload), indent=2))
+        return 0
+    if adapter == "graphviz-dot":
+        print(to_graphviz_dot(payload))
+        return 0
+    raise ValueError(f"unsupported adapter: {adapter}")
+
+
+def _write_diagram_output(
+    output_path: Path,
+    export_format: str,
+    html: str,
+    diagram,
+) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if export_format == "html":
+        output_path.write_text(html, encoding="utf-8")
+        return
+
+    exporter = DiagramExporter()
+    if export_format == "mermaid":
+        output_path.write_text(exporter.render_mermaid(diagram), encoding="utf-8")
+        return
+    if export_format == "svg":
+        output_path.write_text(exporter.render_svg(diagram), encoding="utf-8")
+        return
+    if export_format == "png":
+        output_path.write_bytes(exporter.render_png(diagram))
+        return
+    raise ValueError(f"unsupported export format: {export_format}")
 
 
 if __name__ == "__main__":

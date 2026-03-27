@@ -24,14 +24,14 @@ The project starts from the domain, not from the framework:
 | Nassi-Shneiderman HTML diagram bundles for directories | p1 | done |
 | Depth-coded nested conditionals (up to 50 levels) | p1 | done |
 | Dark Tokyo Night theme with JetBrains Mono | p1 | done |
-| match/case control flow (Python 3.10+) | p1 | planned |
-| Decorator extraction | p1 | planned |
-| Symbol graph / cross-reference export | p3 | planned |
-| Semantic passes (type inference, call graph) | p3 | planned |
-| Incremental parsing and caching | p3 | planned |
-| Interactive HTML diagrams with collapsible nodes | p3 | planned |
-| Export to other diagram formats (SVG, PNG, Mermaid) | p3 | planned |
-| Integration adapters for external analysis tools | p3 | planned |
+| match/case control flow (Python 3.10+) | p1 | done |
+| Decorator extraction | p1 | done |
+| Symbol graph / cross-reference export | p3 | done |
+| Semantic passes (type inference, call graph) | p3 | done |
+| Incremental parsing and caching | p3 | done |
+| Interactive HTML diagrams with collapsible nodes | p3 | done |
+| Export to other diagram formats (SVG, PNG, Mermaid) | p3 | done |
+| Integration adapters for external analysis tools | p3 | done |
 
 ## What the system does
 
@@ -49,6 +49,7 @@ Today the system supports:
   * for loops
   * try/except/finally blocks
   * with statements
+  * match/case statements, including guarded cases
 
 * **Nassi-Shneiderman diagrams**
   * building a Nassi-Shneiderman HTML diagram for one Python file
@@ -57,6 +58,15 @@ Today the system supports:
   * depth-coded nested ifs (up to 50 levels with color cycling and Unicode badges ①-㊿)
   * dark Tokyo Night-inspired theme with JetBrains Mono font
   * proper text wrapping and responsive layout
+  * collapsible function panels for interactive browsing
+  * export to Mermaid and SVG, plus PNG when a system rasterizer is available
+
+* **Semantic and graph exports**
+  * decorator extraction in the structural model
+  * symbol graph and cross-reference export
+  * lightweight semantic passes for inferred local types, inferred returns, and outbound call graph
+  * adapters for JSON, Cytoscape, and Graphviz DOT consumers
+  * content-addressed parse caching for repeated runs
 
 * **Architecture**
   * keeping parser infrastructure behind ports so the application layer stays independent from ANTLR, filesystem, and CLI details
@@ -138,10 +148,25 @@ uv run pya parse-dir path/to/project
 uv run pya nassi-file path/to/algorithms.py --out output/algorithms.nassi.html
 ```
 
+Export Mermaid or SVG instead:
+
+```bash
+uv run pya nassi-file path/to/algorithms.py --format mermaid
+uv run pya nassi-file path/to/algorithms.py --format svg
+```
+
 6. Build Nassi-Shneiderman diagrams for an entire directory:
 
 ```bash
 uv run pya nassi-dir path/to/project --out output/nassi-bundle
+```
+
+7. Export semantic analysis, symbol graph, and cross-references:
+
+```bash
+uv run pya analyze-file path/to/module.py
+uv run pya analyze-dir path/to/project --adapter cytoscape
+uv run pya analyze-file path/to/module.py --adapter graphviz-dot
 ```
 
 ## Constraints and honesty
@@ -152,11 +177,7 @@ The grammar is sourced from `antlr/grammars-v4/python/python3`. It targets the P
 
 Useful future extensions:
 
-* match/case control flow visualization (Python 3.10+)
-* decorator extraction and structural annotation
-* symbol graph export
-* semantic passes on top of the structural model
-* integration adapters for external analysis tools
-* incremental parsing and caching
-* interactive HTML diagrams with collapsible nodes
-* export to other diagram formats (SVG, PNG, Mermaid)
+* richer symbol resolution across files and packages
+* stronger type inference beyond annotations and literal heuristics
+* persistent index storage for large repositories
+* richer SVG/PNG layout parity with the HTML renderer

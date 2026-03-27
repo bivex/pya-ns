@@ -67,6 +67,32 @@ def _build_structure_visitor(visitor_base: type) -> type:
             self.elements: list[StructuralElement] = []
             self._containers: list[str] = []
 
+        def visitDecorated(self, ctx):
+            target_name = self._decorated_target_name(ctx)
+            target_container = ".".join([*self._containers, target_name]) if target_name else None
+            decorators = ctx.decorators()
+            if decorators:
+                for decorator in decorators.decorator():
+                    raw_text = decorator.getText()
+                    self.elements.append(
+                        StructuralElement(
+                            kind=StructuralElementKind.DECORATOR,
+                            name=raw_text.removeprefix("@"),
+                            line=decorator.start.line,
+                            column=decorator.start.column,
+                            container=target_container,
+                            signature=raw_text,
+                        )
+                    )
+
+            if ctx.classdef():
+                return self.visit(ctx.classdef())
+            if ctx.funcdef():
+                return self.visit(ctx.funcdef())
+            if ctx.async_funcdef():
+                return self.visit(ctx.async_funcdef())
+            return None
+
         def visitFuncdef(self, ctx):
             name = ctx.name().NAME().getText() if ctx.name() and ctx.name().NAME() else "unknown"
             self._append(
@@ -149,5 +175,19 @@ def _build_structure_visitor(visitor_base: type) -> type:
                 return callback()
             finally:
                 self._containers.pop()
+
+        def _decorated_target_name(self, ctx) -> str | None:
+            if ctx.classdef() and ctx.classdef().name() and ctx.classdef().name().NAME():
+                return ctx.classdef().name().NAME().getText()
+            if ctx.funcdef() and ctx.funcdef().name() and ctx.funcdef().name().NAME():
+                return ctx.funcdef().name().NAME().getText()
+            if (
+                ctx.async_funcdef()
+                and ctx.async_funcdef().funcdef()
+                and ctx.async_funcdef().funcdef().name()
+                and ctx.async_funcdef().funcdef().name().NAME()
+            ):
+                return ctx.async_funcdef().funcdef().name().NAME().getText()
+            return None
 
     return PythonStructureVisitor

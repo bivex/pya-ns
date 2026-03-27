@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import dataclass
 
@@ -14,6 +15,8 @@ from pya.domain.control_flow import (
     ForInFlowStep,
     FunctionControlFlow,
     IfFlowStep,
+    SwitchCaseFlow,
+    SwitchFlowStep,
     WhileFlowStep,
     WithFlowStep,
 )
@@ -32,13 +35,29 @@ class _ExtractorContext:
     def text(self, ctx) -> str:
         if ctx is None:
             return ""
-        return self.token_stream.getText(
+        # Reconstruct text including hidden channel tokens (whitespace)
+        tokens = self.token_stream.getTokens(
             start=ctx.start.tokenIndex,
             stop=ctx.stop.tokenIndex,
         )
+        parts = []
+        for token in tokens:
+            parts.append(token.text)
+        text = "".join(parts)
+        # If the reconstructed text has no spaces but has multiple tokens,
+        # add spaces between tokens (ANTLR doesn't include whitespace in tokens)
+        if len(tokens) > 1 and " " not in text and text.isalnum() or any(c in text for c in "=<>+-*/%&|^~!"):
+            # Reconstruct with spaces between tokens
+            text = " ".join(token.text for token in tokens)
+        return text
 
     def compact(self, ctx, *, limit: int = 96) -> str:
-        text = re.sub(r"\s+", " ", self.text(ctx)).strip()
+        # Get original text with whitespace
+        text = self.text(ctx)
+        # Strip leading/trailing whitespace but preserve internal spacing
+        text = text.strip()
+        # Collapse multiple consecutive spaces to single space
+        text = re.sub(r"  +", " ", text)
         if len(text) <= limit:
             return text
         return f"{text[: limit - 1]}..."
@@ -61,10 +80,13 @@ class AntlrPythonControlFlowExtractor(PythonControlFlowExtractor):
                 functions=tuple(visitor.functions),
             )
         except Exception:
-            return ControlFlowDiagram(
-                source_location=source_unit.location,
-                functions=(),
-            )
+            try:
+                return _extract_with_ast(source_unit)
+            except Exception:
+                return ControlFlowDiagram(
+                    source_location=source_unit.location,
+                    functions=(),
+                )
 
 
 def _build_control_flow_visitor(visitor_base: type, context: _ExtractorContext) -> type:
@@ -170,6 +192,8 @@ def _build_control_flow_visitor(visitor_base: type, context: _ExtractorContext) 
                 return self._extract_try_stmt(compound_ctx.try_stmt())
             if hasattr(compound_ctx, "with_stmt") and compound_ctx.with_stmt():
                 return self._extract_with_stmt(compound_ctx.with_stmt())
+            if hasattr(compound_ctx, "match_stmt") and compound_ctx.match_stmt():
+                return self._extract_match_stmt(compound_ctx.match_stmt())
 
             # Skip nested function/class definitions (don't recurse)
             if hasattr(compound_ctx, "funcdef") and compound_ctx.funcdef():
@@ -360,4 +384,152 @@ def _build_control_flow_visitor(visitor_base: type, context: _ExtractorContext) 
                 body_steps=body_steps,
             )
 
+        def _extract_match_stmt(self, match_ctx) -> SwitchFlowStep:
+            subject = (
+                context.compact(match_ctx.subject_expr())
+                if hasattr(match_ctx, "subject_expr") and match_ctx.subject_expr()
+                else "value"
+            )
+            cases: list[SwitchCaseFlow] = []
+            for case_ctx in match_ctx.case_block() if hasattr(match_ctx, "case_block") else ():
+                pattern = context.compact(case_ctx.patterns()) if case_ctx.patterns() else "_"
+                guard = (
+                    context.compact(case_ctx.guard())
+                    if hasattr(case_ctx, "guard") and case_ctx.guard()
+                    else ""
+                )
+                label = f"case {pattern}"
+                if guard:
+                    label = f"{label} {guard}"
+                cases.append(
+                    SwitchCaseFlow(
+                        label=label,
+                        steps=self._extract_block(case_ctx.block() if hasattr(case_ctx, "block") else None),
+                    )
+                )
+            return SwitchFlowStep(expression=subject, cases=tuple(cases))
+
     return PythonControlFlowVisitor
+
+
+def _extract_with_ast(source_unit: SourceUnit) -> ControlFlowDiagram:
+    tree = ast.parse(source_unit.content, filename=source_unit.location)
+    visitor = _AstControlFlowVisitor(source_unit)
+    visitor.visit(tree)
+    return ControlFlowDiagram(
+        source_location=source_unit.location,
+        functions=tuple(visitor.functions),
+    )
+
+
+class _AstControlFlowVisitor(ast.NodeVisitor):
+    def __init__(self, source_unit: SourceUnit) -> None:
+        self._source_unit = source_unit
+        self.functions: list[FunctionControlFlow] = []
+        self._containers: list[str] = []
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._containers.append(node.name)
+        self.generic_visit(node)
+        self._containers.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.functions.append(
+            FunctionControlFlow(
+                name=node.name,
+                signature=f"def {node.name}(...)",
+                container=".".join(self._containers) if self._containers else None,
+                steps=self._extract_body(node.body),
+            )
+        )
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.functions.append(
+            FunctionControlFlow(
+                name=node.name,
+                signature=f"async def {node.name}(...)",
+                container=".".join(self._containers) if self._containers else None,
+                steps=self._extract_body(node.body),
+            )
+        )
+
+    def _extract_body(self, statements: list[ast.stmt]) -> tuple[ControlFlowStep, ...]:
+        steps: list[ControlFlowStep] = []
+        for statement in statements:
+            extracted = self._extract_statement(statement)
+            if extracted is not None:
+                steps.append(extracted)
+        return tuple(steps)
+
+    def _extract_statement(self, statement: ast.stmt) -> ControlFlowStep | None:
+        if isinstance(statement, ast.If):
+            return IfFlowStep(
+                condition=_compact_ast_text(self._source_unit.content, statement.test),
+                then_steps=self._extract_body(statement.body),
+                else_steps=self._extract_body(statement.orelse),
+            )
+        if isinstance(statement, ast.While):
+            return WhileFlowStep(
+                condition=_compact_ast_text(self._source_unit.content, statement.test),
+                body_steps=self._extract_body(statement.body),
+            )
+        if isinstance(statement, (ast.For, ast.AsyncFor)):
+            return ForInFlowStep(
+                header=(
+                    f"{_compact_ast_text(self._source_unit.content, statement.target)} in "
+                    f"{_compact_ast_text(self._source_unit.content, statement.iter)}"
+                ),
+                body_steps=self._extract_body(statement.body),
+            )
+        if isinstance(statement, (ast.With, ast.AsyncWith)):
+            return WithFlowStep(
+                header=_compact_ast_text(self._source_unit.content, statement).split(":", 1)[0].strip(),
+                body_steps=self._extract_body(statement.body),
+            )
+        if isinstance(statement, ast.Try):
+            catches = [
+                CatchClauseFlow(
+                    pattern=(
+                        f"except {_compact_ast_text(self._source_unit.content, handler.type)}"
+                        if handler.type
+                        else "except"
+                    ),
+                    steps=self._extract_body(handler.body),
+                )
+                for handler in statement.handlers
+            ]
+            if statement.finalbody:
+                catches.append(
+                    CatchClauseFlow(
+                        pattern="finally",
+                        steps=self._extract_body(statement.finalbody),
+                    )
+                )
+            return DoCatchFlowStep(
+                body_steps=self._extract_body(statement.body),
+                catches=tuple(catches),
+            )
+        if isinstance(statement, ast.Match):
+            cases = []
+            for case in statement.cases:
+                label = f"case {_compact_ast_text(self._source_unit.content, case.pattern)}"
+                if case.guard is not None:
+                    label = f"{label} if {_compact_ast_text(self._source_unit.content, case.guard)}"
+                cases.append(SwitchCaseFlow(label=label, steps=self._extract_body(case.body)))
+            return SwitchFlowStep(
+                expression=_compact_ast_text(self._source_unit.content, statement.subject),
+                cases=tuple(cases),
+            )
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            return None
+        return ActionFlowStep(_compact_ast_text(self._source_unit.content, statement))
+
+
+def _compact_ast_text(source_text: str, node: ast.AST | None, *, limit: int = 96) -> str:
+    if node is None:
+        return ""
+    text = ast.get_source_segment(source_text, node) or ast.unparse(node)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 1]}..."

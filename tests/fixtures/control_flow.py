@@ -51,3 +51,13 @@ def with_statement(path: str) -> str:
 async def async_function(x: int) -> int:
     await some_async_operation()
     return x * 2
+
+
+def match_case(value: object) -> str:
+    match value:
+        case 0:
+            return "zero"
+        case int() if value > 0:
+            return "positive-int"
+        case _:
+            return "fallback"

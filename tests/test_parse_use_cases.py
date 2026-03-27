@@ -52,6 +52,7 @@ def test_parse_file_extracts_structure() -> None:
         "import",
         "class",
         "function",
+        "decorator",
     }
 
 
@@ -101,3 +102,26 @@ def test_cli_outputs_json() -> None:
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     assert payload["summary"]["source_count"] == 1
+
+
+def test_parse_file_cache_writes_content_addressed_entry(tmp_path: Path) -> None:
+    _ensure_generated_parser()
+    cache_dir = tmp_path / "cache"
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "pya",
+            "parse-file",
+            str(ROOT / "tests" / "fixtures" / "valid.py"),
+            "--cache-dir",
+            str(cache_dir),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert any(cache_dir.glob("*.json"))
