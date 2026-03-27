@@ -83,12 +83,13 @@ class SemanticAnalysisService:
             successful_analyses.append(analysis)
             documents.append(_analysis_to_dict(analysis))
 
-        bundle_references = _resolve_bundle_references(successful_analyses)
+        resolved_root_path = str(Path(command.root_path).expanduser().resolve())
+        bundle_references = _resolve_bundle_references(successful_analyses, resolved_root_path)
         return SemanticAnalysisBundleDTO(
-            root_path=str(Path(command.root_path).expanduser().resolve()),
+            root_path=resolved_root_path,
             document_count=len(documents),
             payload={
-                "root_path": str(Path(command.root_path).expanduser().resolve()),
+                "root_path": resolved_root_path,
                 "document_count": len(documents),
                 "success_count": len(successful_analyses),
                 "failure_count": failure_count,
@@ -146,27 +147,48 @@ def _analysis_to_dict(analysis: SemanticAnalysis) -> dict[str, object]:
     }
 
 
-def _resolve_bundle_references(analyses: list[SemanticAnalysis]) -> list[dict[str, Any]]:
+def _resolve_bundle_references(
+    analyses: list[SemanticAnalysis],
+    root_path: str,
+) -> list[dict[str, Any]]:
     bundle_refs: list[dict[str, Any]] = []
     export_docs = [_analysis_to_dict(analysis) for analysis in analyses]
     symbol_by_name: dict[str, list[dict[str, object]]] = {}
+    symbol_by_qualified_name: dict[str, list[dict[str, object]]] = {}
     module_symbol_index: dict[str, dict[str, dict[str, object]]] = {}
+    module_paths: dict[str, str] = {}
 
     for document in export_docs:
-        module_name = Path(str(document["source_location"])).stem
+        module_name = _module_name_from_location(str(document["source_location"]), root_path)
         current_module_symbols: dict[str, dict[str, object]] = {}
+        module_paths[module_name] = str(document["source_location"])
         for symbol in document["symbols"]:
             symbol_by_name.setdefault(str(symbol["name"]), []).append(symbol)
             current_module_symbols[str(symbol["name"])] = symbol
+            symbol_by_qualified_name.setdefault(
+                f'{module_name}.{symbol["name"]}',
+                [],
+            ).append(symbol)
             if symbol["container"]:
                 qualified_name = f'{symbol["container"]}.{symbol["name"]}'
                 symbol_by_name.setdefault(qualified_name, []).append(symbol)
+                symbol_by_qualified_name.setdefault(
+                    f"{module_name}.{qualified_name}",
+                    [],
+                ).append(symbol)
         module_symbol_index[module_name] = current_module_symbols
 
     for document in export_docs:
         source_location = str(document["source_location"])
         local_import_targets = {
-            str(symbol["name"]): symbol["symbol_id"]
+            str(symbol["name"]): next(
+                (
+                    str(reference["target_id"])
+                    for reference in document["references"]
+                    if reference["source_id"] == symbol["symbol_id"]
+                ),
+                "",
+            )
             for symbol in document["symbols"]
             if symbol["kind"] == "import"
         }
@@ -181,6 +203,8 @@ def _resolve_bundle_references(analyses: list[SemanticAnalysis]) -> list[dict[st
                 resolved_target = module_symbol_index.get(module_name, {}).get(imported_name)
                 if resolved_target is not None:
                     relationship = "imports_local"
+            elif target_id in module_paths:
+                relationship = "imports_module_local"
             if resolved_target is None:
                 candidates = symbol_by_name.get(target_id, [])
                 if len(candidates) == 1:
@@ -211,8 +235,43 @@ def _resolve_bundle_references(analyses: list[SemanticAnalysis]) -> list[dict[st
                 continue
 
             for call in function["outbound_calls"]:
+                imported_target = local_import_targets.get(call)
+                if imported_target:
+                    imported_candidates = symbol_by_qualified_name.get(imported_target, [])
+                    if len(imported_candidates) == 1:
+                        bundle_refs.append(
+                            {
+                                "source_id": source_id,
+                                "target_id": imported_candidates[0]["symbol_id"],
+                                "relationship": "calls_import",
+                                "location": source_location,
+                                "line": function["line"],
+                                "column": 0,
+                            }
+                        )
+                        continue
+
+                if "." in call:
+                    import_alias, _, member_name = call.partition(".")
+                    alias_target = local_import_targets.get(import_alias)
+                    if alias_target:
+                        qualified_target = f"{alias_target}.{member_name}"
+                        imported_candidates = symbol_by_qualified_name.get(qualified_target, [])
+                        if len(imported_candidates) == 1:
+                            bundle_refs.append(
+                                {
+                                    "source_id": source_id,
+                                    "target_id": imported_candidates[0]["symbol_id"],
+                                    "relationship": "calls_import",
+                                    "location": source_location,
+                                    "line": function["line"],
+                                    "column": 0,
+                                }
+                            )
+                            continue
+
                 imported_source = local_import_targets.get(call)
-                if imported_source is not None:
+                if imported_source:
                     bundle_refs.append(
                         {
                             "source_id": source_id,
@@ -254,3 +313,11 @@ def _resolve_bundle_references(analyses: list[SemanticAnalysis]) -> list[dict[st
         seen.add(key)
         deduped.append(reference)
     return deduped
+
+
+def _module_name_from_location(source_location: str, root_path: str) -> str:
+    relative = Path(source_location).resolve().relative_to(Path(root_path).resolve())
+    parts = list(relative.with_suffix("").parts)
+    if parts and parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts)

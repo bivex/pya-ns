@@ -9,3 +9,7 @@ def format_summary(workspace_name: str, status: str) -> str:
 
 def helper_label(kind: str) -> str:
     return f"label:{kind}"
+
+
+def package_badge(kind: str) -> str:
+    return f"pkg:{kind}"

@@ -61,7 +61,21 @@ class _SemanticVisitor(ast.NodeVisitor):
                     location=self.location,
                     line=node.lineno,
                     column=node.col_offset,
-                    signature=f"import {alias.name}",
+                    signature=(
+                        f"import {alias.name} as {alias.asname}"
+                        if alias.asname
+                        else f"import {alias.name}"
+                    ),
+                )
+            )
+            self.references.append(
+                SymbolReference(
+                    source_id=symbol_id,
+                    target_id=alias.name,
+                    relationship="imports",
+                    location=self.location,
+                    line=node.lineno,
+                    column=node.col_offset,
                 )
             )
 
@@ -80,7 +94,13 @@ class _SemanticVisitor(ast.NodeVisitor):
                     location=self.location,
                     line=node.lineno,
                     column=node.col_offset,
-                    signature=f"from {module} import {alias.name}" if module else f"import {alias.name}",
+                    signature=(
+                        f"from {module} import {alias.name} as {alias.asname}"
+                        if module and alias.asname
+                        else f"from {module} import {alias.name}"
+                        if module
+                        else f"import {alias.name}"
+                    ),
                 )
             )
             self.references.append(
@@ -290,6 +310,8 @@ def _infer_type(node: ast.AST | None) -> str | None:
         return "None"
     if isinstance(node, ast.Constant):
         return type(node.value).__name__
+    if isinstance(node, ast.JoinedStr):
+        return "str"
     if isinstance(node, ast.List):
         return "list"
     if isinstance(node, ast.Dict):
@@ -298,8 +320,32 @@ def _infer_type(node: ast.AST | None) -> str | None:
         return "set"
     if isinstance(node, ast.Tuple):
         return "tuple"
+    if isinstance(node, ast.Compare):
+        return "bool"
+    if isinstance(node, ast.BoolOp):
+        return "bool"
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return "bool"
+    if isinstance(node, ast.Await):
+        return _infer_type(node.value)
+    if isinstance(node, ast.IfExp):
+        left = _infer_type(node.body)
+        right = _infer_type(node.orelse)
+        if left and right:
+            return left if left == right else f"{left} | {right}"
+        return left or right
+    if isinstance(node, ast.BinOp):
+        left = _infer_type(node.left)
+        right = _infer_type(node.right)
+        if left == right and left in {"int", "float", "str"}:
+            return left
+        if {left, right} == {"int", "float"}:
+            return "float"
     if isinstance(node, ast.Call):
-        return _expr_text(node.func)
+        callee = _expr_text(node.func)
+        if callee in {"int", "float", "str", "bool", "list", "dict", "set", "tuple"}:
+            return callee
+        return callee
     return None
 
 

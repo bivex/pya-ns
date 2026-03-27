@@ -113,3 +113,28 @@ def test_analysis_dir_resolves_local_imports_across_example_files() -> None:
     payload = json.loads(result.stdout)
     relationships = {reference["relationship"] for reference in payload["bundle_references"]}
     assert "imports_local" in relationships or "calls_import" in relationships
+    target_ids = {reference["target_id"] for reference in payload["bundle_references"]}
+    assert any("feature_support.py::function::format_summary" in target for target in target_ids)
+    assert any("support_pkg/helpers.py::function::package_summary" in target for target in target_ids)
+
+
+def test_analysis_file_infers_common_python_types() -> None:
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "pya",
+            "analyze-file",
+            str(ROOT / "examples" / "feature_support.py"),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    functions = {function["qualified_name"]: function for function in payload["functions"]}
+    assert functions["format_summary"]["inferred_return_type"] == "str"
+    assert functions["helper_label"]["inferred_return_type"] == "str"

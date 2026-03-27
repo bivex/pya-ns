@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import feature_support as support_tools
 from dataclasses import dataclass
 from pathlib import Path
 
-from feature_support import format_summary, helper_label
+from feature_support import format_summary as summarize_workspace
+from support_pkg.helpers import package_summary as summarize_package
 
 
 APP_NAME = "pya-feature-tour"
@@ -150,11 +152,12 @@ async def mark_async_boundary(label: str) -> None:
 def evaluate_workspace(config: TourConfig) -> str:
     match config.workspace_name:
         case "hidden-workspace":
-            return format_summary(config.workspace_name, helper_label("hidden"))
+            return summarize_workspace(config.workspace_name, support_tools.helper_label("hidden"))
         case "filesystem-root":
-            return format_summary(config.workspace_name, helper_label("root"))
+            return summarize_workspace(config.workspace_name, support_tools.package_badge("root"))
         case _:
-            return format_summary(config.workspace_name, resilient_summary(config))
+            base = summarize_workspace(config.workspace_name, resilient_summary(config))
+            return summarize_package(base)
 
 
 def feature_tour(root: Path) -> str:
