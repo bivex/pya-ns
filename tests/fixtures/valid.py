@@ -5,6 +5,7 @@ from typing import List
 
 
 MY_CONSTANT = 42
+APP_NAME: str = "pya"
 
 
 def greet(name: str) -> str:

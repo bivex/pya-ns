@@ -61,3 +61,30 @@ def match_case(value: object) -> str:
             return "positive-int"
         case _:
             return "fallback"
+
+
+def loop_else(limit: int) -> int:
+    total = 0
+    for value in range(limit):
+        total += value
+    else:
+        total += 100
+
+    while total < 0:
+        total += 1
+    else:
+        total += 1
+
+    return total
+
+
+def try_else(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        print(exc)
+        return 0
+    else:
+        return parsed + 1
+    finally:
+        print("cleanup")

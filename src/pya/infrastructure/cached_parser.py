@@ -21,6 +21,9 @@ from pya.domain.model import (
 from pya.domain.ports import PythonSyntaxParser
 
 
+CACHE_FORMAT_VERSION = "parser-cache-v2"
+
+
 class CachedPythonSyntaxParser(PythonSyntaxParser):
     def __init__(self, inner: PythonSyntaxParser, cache_dir: str | Path) -> None:
         self._inner = inner
@@ -43,7 +46,10 @@ class CachedPythonSyntaxParser(PythonSyntaxParser):
     def _cache_path(self, source_unit: SourceUnit) -> Path:
         key = hashlib.sha256(
             (
-                f"{source_unit.location}\n{self.grammar_version.value}\n{source_unit.content}"
+                f"{CACHE_FORMAT_VERSION}\n"
+                f"{source_unit.location}\n"
+                f"{self.grammar_version.value}\n"
+                f"{source_unit.content}"
             ).encode("utf-8")
         ).hexdigest()
         return self._cache_dir / f"{key}.json"

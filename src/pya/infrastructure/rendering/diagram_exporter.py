@@ -117,12 +117,18 @@ def _render_mermaid_step(
         for child in step.body_steps:
             branch_prev, counter = _render_mermaid_step(lines, child, branch_prev, counter)
         lines.append(f"    {branch_prev} --> {node_id}")
+        else_prev = node_id
+        for child in step.else_steps:
+            else_prev, counter = _render_mermaid_step(lines, child, else_prev, counter)
     elif isinstance(step, ForInFlowStep):
         lines.append(f'    {node_id}{{"for {_mermaid_escape(step.header)}"}}')
         branch_prev = node_id
         for child in step.body_steps:
             branch_prev, counter = _render_mermaid_step(lines, child, branch_prev, counter)
         lines.append(f"    {branch_prev} --> {node_id}")
+        else_prev = node_id
+        for child in step.else_steps:
+            else_prev, counter = _render_mermaid_step(lines, child, else_prev, counter)
     elif isinstance(step, WithFlowStep):
         lines.append(f'    {node_id}["{_mermaid_escape(step.header)}"]')
         branch_prev = node_id
@@ -143,6 +149,9 @@ def _render_mermaid_step(
         branch_prev = node_id
         for child in step.body_steps:
             branch_prev, counter = _render_mermaid_step(lines, child, branch_prev, counter)
+        else_prev = node_id
+        for child in step.else_steps:
+            else_prev, counter = _render_mermaid_step(lines, child, else_prev, counter)
         for catch in step.catches:
             catch_id = f"node_{counter}"
             counter += 1
@@ -174,9 +183,15 @@ def _flatten_steps(steps: tuple[ControlFlowStep, ...], *, indent: int) -> list[s
         elif isinstance(step, WhileFlowStep):
             lines.append(f"{prefix}- while {step.condition}")
             lines.extend(_flatten_steps(step.body_steps, indent=indent + 1))
+            if step.else_steps:
+                lines.append(f"{prefix}- else")
+                lines.extend(_flatten_steps(step.else_steps, indent=indent + 1))
         elif isinstance(step, ForInFlowStep):
             lines.append(f"{prefix}- for {step.header}")
             lines.extend(_flatten_steps(step.body_steps, indent=indent + 1))
+            if step.else_steps:
+                lines.append(f"{prefix}- else")
+                lines.extend(_flatten_steps(step.else_steps, indent=indent + 1))
         elif isinstance(step, WithFlowStep):
             lines.append(f"{prefix}- {step.header}")
             lines.extend(_flatten_steps(step.body_steps, indent=indent + 1))
@@ -188,6 +203,9 @@ def _flatten_steps(steps: tuple[ControlFlowStep, ...], *, indent: int) -> list[s
         elif isinstance(step, DoCatchFlowStep):
             lines.append(f"{prefix}- try")
             lines.extend(_flatten_steps(step.body_steps, indent=indent + 1))
+            if step.else_steps:
+                lines.append(f"{prefix}- else")
+                lines.extend(_flatten_steps(step.else_steps, indent=indent + 1))
             for catch in step.catches:
                 lines.append(f"{prefix}  - catch {catch.pattern}")
                 lines.extend(_flatten_steps(catch.steps, indent=indent + 2))

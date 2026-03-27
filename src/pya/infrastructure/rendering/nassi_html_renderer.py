@@ -652,14 +652,32 @@ class HtmlNassiDiagramRenderer(NassiDiagramRenderer):
                 "</div>"
             )
         if isinstance(step, WhileFlowStep):
-            return self._render_single_body(f"While {step.condition}", step.body_steps, depth=depth)
+            return self._render_loop_with_optional_else(
+                f"While {step.condition}",
+                step.body_steps,
+                step.else_steps,
+                depth=depth,
+            )
         if isinstance(step, ForInFlowStep):
-            return self._render_single_body(f"For {step.header}", step.body_steps, depth=depth)
+            return self._render_loop_with_optional_else(
+                f"For {step.header}",
+                step.body_steps,
+                step.else_steps,
+                depth=depth,
+            )
         if isinstance(step, WithFlowStep):
             return self._render_single_body(step.header, step.body_steps, depth=depth, css_class="ns-with")
         if isinstance(step, SwitchFlowStep):
             return self._render_switch(step, depth=depth)
         if isinstance(step, DoCatchFlowStep):
+            else_markup = ""
+            if step.else_steps:
+                else_markup = self._render_single_body(
+                    "Else",
+                    step.else_steps,
+                    depth=depth + 1,
+                    css_class="ns-do-catch",
+                )
             catches = "".join(
                 self._render_single_body(
                     f"Catch {catch.pattern}",
@@ -673,6 +691,7 @@ class HtmlNassiDiagramRenderer(NassiDiagramRenderer):
                 '<div class="ns-node ns-do-catch">'
                 f"{self._render_header('Try')}"
                 f"{self._render_sequence(step.body_steps, depth=depth + 1)}"
+                f"{else_markup}"
                 f'<div class="ns-catches">{catches}</div>'
                 "</div>"
             )
@@ -698,6 +717,29 @@ class HtmlNassiDiagramRenderer(NassiDiagramRenderer):
             f'<div class="ns-node {css_class}">'
             f"{self._render_header(title)}"
             f"{self._render_sequence(steps, depth=depth + 1)}"
+            "</div>"
+        )
+
+    def _render_loop_with_optional_else(
+        self,
+        title: str,
+        body_steps: tuple[ControlFlowStep, ...],
+        else_steps: tuple[ControlFlowStep, ...],
+        *,
+        depth: int,
+    ) -> str:
+        else_markup = ""
+        if else_steps:
+            else_markup = self._render_single_body(
+                "Else",
+                else_steps,
+                depth=depth + 1,
+            )
+        return (
+            '<div class="ns-node ns-loop">'
+            f"{self._render_header(title)}"
+            f"{self._render_sequence(body_steps, depth=depth + 1)}"
+            f"{else_markup}"
             "</div>"
         )
 

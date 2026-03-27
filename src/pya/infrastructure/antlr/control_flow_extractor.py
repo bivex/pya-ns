@@ -304,14 +304,18 @@ def _build_control_flow_visitor(visitor_base: type, context: _ExtractorContext) 
             - while_ctx.block() returns a single block context
             """
             test = while_ctx.test() if hasattr(while_ctx, "test") else None
-            block = while_ctx.block() if hasattr(while_ctx, "block") else None
+            blocks = list(while_ctx.block()) if hasattr(while_ctx, "block") else []
+            block = blocks[0] if blocks else None
+            else_block = blocks[1] if len(blocks) > 1 else None
 
             condition = context.compact(test) if test else "condition"
             body_steps = self._extract_block(block) if block else ()
+            else_steps = self._extract_block(else_block) if else_block else ()
 
             return WhileFlowStep(
                 condition=condition,
                 body_steps=body_steps,
+                else_steps=else_steps,
             )
 
         def _extract_for_stmt(self, for_ctx) -> ForInFlowStep:
@@ -323,7 +327,9 @@ def _build_control_flow_visitor(visitor_base: type, context: _ExtractorContext) 
             """
             exprlist = for_ctx.exprlist() if hasattr(for_ctx, "exprlist") else None
             testlist = for_ctx.testlist() if hasattr(for_ctx, "testlist") else None
-            block = for_ctx.block() if hasattr(for_ctx, "block") else None
+            blocks = list(for_ctx.block()) if hasattr(for_ctx, "block") else []
+            block = blocks[0] if blocks else None
+            else_block = blocks[1] if len(blocks) > 1 else None
 
             header_parts = []
             if exprlist:
@@ -334,10 +340,12 @@ def _build_control_flow_visitor(visitor_base: type, context: _ExtractorContext) 
             header = " ".join(header_parts) if header_parts else "item in iterable"
 
             body_steps = self._extract_block(block) if block else ()
+            else_steps = self._extract_block(else_block) if else_block else ()
 
             return ForInFlowStep(
                 header=header,
                 body_steps=body_steps,
+                else_steps=else_steps,
             )
 
         def _extract_try_stmt(self, try_ctx) -> DoCatchFlowStep:
@@ -354,18 +362,37 @@ def _build_control_flow_visitor(visitor_base: type, context: _ExtractorContext) 
             body_steps = self._extract_block(blocks[0])
 
             catches: list[CatchClauseFlow] = []
+            else_steps: tuple[ControlFlowStep, ...] = ()
+            except_clauses = list(try_ctx.except_clause()) if hasattr(try_ctx, "except_clause") else []
+            block_index = 1
 
-            # Look for except clauses and finally block
-            # The structure varies based on what's present
-            remaining_blocks = blocks[1:] if len(blocks) > 1 else []
+            for except_clause in except_clauses:
+                handler_block = blocks[block_index] if block_index < len(blocks) else None
+                block_index += 1
+                if handler_block is None:
+                    continue
+                pattern = "except"
+                if except_clause.test():
+                    pattern = f"except {context.compact(except_clause.test())}"
+                if except_clause.name():
+                    pattern = f"{pattern} as {context.compact(except_clause.name())}"
+                catches.append(
+                    CatchClauseFlow(
+                        pattern=pattern,
+                        steps=self._extract_block(handler_block),
+                    )
+                )
 
-            # Check if there's a finally block (last block in try_stmt with 'finally')
             text = context.text(try_ctx)
-            has_finally = "finally" in text
+            has_else = "else" in text and len(blocks) > block_index
+            has_finally = "finally" in text and len(blocks) > block_index
 
-            if has_finally and remaining_blocks:
-                # Last block is finally
-                finally_steps = self._extract_block(remaining_blocks[-1])
+            if has_else:
+                else_steps = self._extract_block(blocks[block_index])
+                block_index += 1
+
+            if has_finally and len(blocks) > block_index:
+                finally_steps = self._extract_block(blocks[block_index])
                 if finally_steps:
                     catches.append(
                         CatchClauseFlow(
@@ -373,20 +400,11 @@ def _build_control_flow_visitor(visitor_base: type, context: _ExtractorContext) 
                             steps=finally_steps,
                         )
                     )
-                remaining_blocks = remaining_blocks[:-1]
-
-            # The remaining blocks are except handlers
-            for block in remaining_blocks:
-                catches.append(
-                    CatchClauseFlow(
-                        pattern="except",
-                        steps=self._extract_block(block),
-                    )
-                )
 
             return DoCatchFlowStep(
                 body_steps=body_steps,
                 catches=tuple(catches),
+                else_steps=else_steps,
             )
 
         def _extract_with_stmt(self, with_ctx) -> WithFlowStep:
@@ -498,6 +516,7 @@ class _AstControlFlowVisitor(ast.NodeVisitor):
             return WhileFlowStep(
                 condition=_compact_ast_text(self._source_unit.content, statement.test),
                 body_steps=self._extract_body(statement.body),
+                else_steps=self._extract_body(statement.orelse),
             )
         if isinstance(statement, (ast.For, ast.AsyncFor)):
             return ForInFlowStep(
@@ -506,6 +525,7 @@ class _AstControlFlowVisitor(ast.NodeVisitor):
                     f"{_compact_ast_text(self._source_unit.content, statement.iter)}"
                 ),
                 body_steps=self._extract_body(statement.body),
+                else_steps=self._extract_body(statement.orelse),
             )
         if isinstance(statement, (ast.With, ast.AsyncWith)):
             return WithFlowStep(
@@ -515,11 +535,7 @@ class _AstControlFlowVisitor(ast.NodeVisitor):
         if isinstance(statement, ast.Try):
             catches = [
                 CatchClauseFlow(
-                    pattern=(
-                        f"except {_compact_ast_text(self._source_unit.content, handler.type)}"
-                        if handler.type
-                        else "except"
-                    ),
+                    pattern=_ast_except_pattern(self._source_unit.content, handler),
                     steps=self._extract_body(handler.body),
                 )
                 for handler in statement.handlers
@@ -534,6 +550,7 @@ class _AstControlFlowVisitor(ast.NodeVisitor):
             return DoCatchFlowStep(
                 body_steps=self._extract_body(statement.body),
                 catches=tuple(catches),
+                else_steps=self._extract_body(statement.orelse),
             )
         if isinstance(statement, ast.Match):
             cases = []
@@ -559,3 +576,12 @@ def _compact_ast_text(source_text: str, node: ast.AST | None, *, limit: int = 96
     if len(text) <= limit:
         return text
     return f"{text[: limit - 1]}..."
+
+
+def _ast_except_pattern(source_text: str, handler: ast.ExceptHandler) -> str:
+    if handler.type is None:
+        return f"except as {handler.name}" if handler.name else "except"
+    pattern = f"except {_compact_ast_text(source_text, handler.type)}"
+    if handler.name:
+        return f"{pattern} as {handler.name}"
+    return pattern

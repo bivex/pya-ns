@@ -53,7 +53,9 @@ def test_parse_file_extracts_structure() -> None:
         "class",
         "function",
         "decorator",
+        "variable",
     }
+    assert any(element.name == "APP_NAME" for element in report.sources[0].structural_elements)
 
 
 def test_parse_directory_returns_report_for_all_files() -> None:
@@ -125,3 +127,28 @@ def test_parse_file_cache_writes_content_addressed_entry(tmp_path: Path) -> None
 
     assert result.returncode == 0
     assert any(cache_dir.glob("*.json"))
+
+
+def test_parse_file_supports_match_case_via_structure_fallback() -> None:
+    _ensure_generated_parser()
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "pya",
+            "parse-file",
+            str(ROOT / "examples" / "feature_tour.py"),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["summary"]["technical_failure_count"] == 0
+    assert any(
+        element["kind"] == "decorator"
+        for element in payload["sources"][0]["structural_elements"]
+    )

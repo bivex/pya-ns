@@ -12,10 +12,12 @@ from pya.application.control_flow import (
 from pya.domain.control_flow import (
     ActionFlowStep,
     ControlFlowDiagram,
+    DoCatchFlowStep,
     ForInFlowStep,
     FunctionControlFlow,
     IfFlowStep,
     SwitchFlowStep,
+    WhileFlowStep,
 )
 from pya.domain.model import SourceUnit, SourceUnitId
 from pya.infrastructure.antlr.control_flow_extractor import AntlrPythonControlFlowExtractor
@@ -124,6 +126,34 @@ def test_mermaid_and_svg_exports_are_available() -> None:
     assert "match value" in mermaid
     assert svg.startswith("<svg")
     assert "Function: match_case" in svg
+
+
+def test_loop_else_and_try_else_are_extracted() -> None:
+    _ensure_generated_parser()
+    repository = FileSystemSourceRepository()
+    extractor = AntlrPythonControlFlowExtractor()
+    diagram = extractor.extract(repository.load_file(str(ROOT / "tests" / "fixtures" / "control_flow.py")))
+
+    loop_else_function = next(function for function in diagram.functions if function.name == "loop_else")
+    assert any(isinstance(step, ForInFlowStep) and step.else_steps for step in loop_else_function.steps)
+    assert any(isinstance(step, WhileFlowStep) and step.else_steps for step in loop_else_function.steps)
+
+    try_else_function = next(function for function in diagram.functions if function.name == "try_else")
+    try_step = next(step for step in try_else_function.steps if isinstance(step, DoCatchFlowStep))
+    assert try_step.else_steps
+    assert any(catch.pattern == "except ValueError as exc" for catch in try_step.catches)
+
+
+def test_renderer_shows_loop_else_and_try_else_sections() -> None:
+    service = _build_service()
+    document = service.build_file_diagram(
+        BuildNassiDiagramCommand(path=str(ROOT / "tests" / "fixtures" / "control_flow.py"))
+    )
+
+    assert "For value in range(limit)" in document.html
+    assert "While total &lt; 0" in document.html
+    assert "Catch except ValueError as exc" in document.html
+    assert document.html.count(">Else<") >= 2
 
 
 # ---------------------------------------------------------------------------
