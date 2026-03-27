@@ -103,13 +103,13 @@ The Nassi-Shneiderman diagrams include:
 
 ### Screenshots
 
-**Basic control flow** — loops and try/except blocks:
+**Control-flow overview** — current renderer output for loops, try/except, with, async, and `match/case`:
 
 ![Basic NS diagram](docs/screenshots/nassi_diagram.png)
 
-**Nested conditionals** — depth-coded badges and colors for up to 50 nesting levels:
+**Feature tour** — decorators, property methods, interactive panels, and Python-native `match/case` rendering:
 
-![Nested depth diagram](docs/screenshots/nested_depth.png)
+![Feature tour diagram](docs/screenshots/nested_depth.png)
 
 ## Architecture
 

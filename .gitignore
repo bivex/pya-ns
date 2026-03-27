@@ -8,3 +8,4 @@ build/
 dist/
 src/swifta/infrastructure/antlr/generated/swift5/
 /.pya-cache
+/docs/screenshots/.playwright-cli
