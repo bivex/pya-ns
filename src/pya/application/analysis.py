@@ -340,7 +340,11 @@ def _propagate_bundle_return_types(
 
         for reference in document["references"]:
             if str(reference["relationship"]) == "imports":
-                import_target_by_symbol_id[str(reference["source_id"])] = str(reference["target_id"])
+                import_target_by_symbol_id[str(reference["source_id"])] = _normalize_target_id(
+                    str(reference["target_id"]),
+                    source_module=module_name,
+                    source_location=source_location,
+                )
 
         symbol_id_by_function_name: dict[str, str] = {}
         for symbol in document["symbols"]:
@@ -499,7 +503,11 @@ def _resolve_bundle_references(
         module_symbol_index[module_name] = current_module_symbols
         for reference in document["references"]:
             if str(reference["relationship"]) == "imports":
-                import_target_by_symbol_id[str(reference["source_id"])] = str(reference["target_id"])
+                import_target_by_symbol_id[str(reference["source_id"])] = _normalize_target_id(
+                    str(reference["target_id"]),
+                    source_module=module_name,
+                    source_location=str(document["source_location"]),
+                )
 
     for document in export_docs:
         source_location = str(document["source_location"])

@@ -198,6 +198,40 @@ def test_analysis_dir_propagates_imported_return_types_into_function_results() -
     assert functions["feature_tour"]["inferred_return_type"] == "str"
 
 
+def test_analysis_file_tracks_nested_function_scopes_in_symbol_graph() -> None:
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "pya",
+            "analyze-file",
+            str(ROOT / "examples" / "feature_tour.py"),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    functions = {function["qualified_name"] for function in payload["functions"]}
+    assert "traced.decorate" in functions
+    assert "traced.decorate.wrapper" in functions
+    assert "audit.decorate" in functions
+    assert "audit.decorate.wrapper" in functions
+
+    symbols = {
+        (symbol["name"], symbol["container"])
+        for symbol in payload["symbols"]
+        if symbol["kind"] == "function"
+    }
+    assert ("decorate", "traced") in symbols
+    assert ("wrapper", "traced.decorate") in symbols
+    assert ("decorate", "audit") in symbols
+    assert ("wrapper", "audit.decorate") in symbols
+
+
 def test_analysis_dir_resolves_package_reexports_and_prefers_local_calls(tmp_path: Path) -> None:
     pkg_dir = tmp_path / "pkg"
     pkg_dir.mkdir()
@@ -661,3 +695,61 @@ def test_analysis_dir_resolves_module_chain_calls_and_cross_file_binding_types(
     bindings = {binding["name"]: binding["inferred_type"] for binding in functions["run"]["local_bindings"]}
     assert bindings["label"] == "str"
     assert functions["run"]["inferred_return_type"] == "str"
+
+
+def test_analysis_dir_resolves_package_relative_reexport_call_chains(tmp_path: Path) -> None:
+    pkg_dir = tmp_path / "pkg"
+    subpkg_dir = pkg_dir / "subpkg"
+    subpkg_dir.mkdir(parents=True)
+    (pkg_dir / "__init__.py").write_text("", encoding="utf-8")
+    (subpkg_dir / "__init__.py").write_text("from .worker import run\n", encoding="utf-8")
+    (subpkg_dir / "worker.py").write_text(
+        "\n".join(
+            [
+                "def run() -> str:",
+                '    return "sub"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "consumer.py").write_text(
+        "\n".join(
+            [
+                "from pkg import subpkg",
+                "",
+                "def use_subpkg():",
+                "    return subpkg.run()",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "pya",
+            "analyze-dir",
+            str(tmp_path),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    subpkg_refs = [
+        reference
+        for reference in payload["bundle_references"]
+        if "consumer.py::function::use_subpkg" in reference["source_id"]
+    ]
+    assert any(reference["relationship"] == "calls_import" for reference in subpkg_refs)
+    assert any("pkg/subpkg/worker.py::function::run" in reference["target_id"] for reference in subpkg_refs)
+
+    consumer_doc = next(
+        document for document in payload["documents"] if document["source_location"].endswith("consumer.py")
+    )
+    functions = {function["qualified_name"]: function for function in consumer_doc["functions"]}
+    assert functions["use_subpkg"]["inferred_return_type"] == "str"

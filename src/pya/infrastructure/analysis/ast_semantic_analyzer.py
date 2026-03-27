@@ -338,6 +338,8 @@ class _SemanticVisitor(ast.NodeVisitor):
             )
 
     def _container(self) -> str | None:
+        if self._function_stack:
+            return self._function_stack[-1].qualified_name
         parts = [*self._class_stack]
         return ".".join(parts) if parts else None
 
