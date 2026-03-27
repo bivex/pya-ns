@@ -95,6 +95,28 @@ def _build_control_flow_visitor(visitor_base: type, context: _ExtractorContext) 
             super().__init__()
             self.functions: list[FunctionControlFlow] = []
             self._containers: list[str] = []
+            self._pending_decorators: list[str] = []
+
+        def visitDecorated(self, ctx):
+            decorators = []
+            if ctx.decorators():
+                decorators = [
+                    context.compact(decorator).removeprefix("@")
+                    for decorator in ctx.decorators().decorator()
+                ]
+
+            previous = self._pending_decorators
+            self._pending_decorators = decorators
+            try:
+                if ctx.classdef():
+                    return self.visit(ctx.classdef())
+                if ctx.funcdef():
+                    return self.visit(ctx.funcdef())
+                if ctx.async_funcdef():
+                    return self.visit(ctx.async_funcdef())
+                return None
+            finally:
+                self._pending_decorators = previous
 
         def visitClassdef(self, ctx):
             name = ctx.name().NAME().getText() if ctx.name() and ctx.name().NAME() else "unknown"
@@ -110,6 +132,7 @@ def _build_control_flow_visitor(visitor_base: type, context: _ExtractorContext) 
                     signature=signature,
                     container=".".join(self._containers) if self._containers else None,
                     steps=self._extract_block(block),
+                    decorators=tuple(self._pending_decorators),
                 )
             )
             return None
@@ -125,6 +148,7 @@ def _build_control_flow_visitor(visitor_base: type, context: _ExtractorContext) 
                     signature=signature,
                     container=".".join(self._containers) if self._containers else None,
                     steps=self._extract_block(block),
+                    decorators=tuple(self._pending_decorators),
                 )
             )
             return None
@@ -440,6 +464,7 @@ class _AstControlFlowVisitor(ast.NodeVisitor):
                 signature=f"def {node.name}(...)",
                 container=".".join(self._containers) if self._containers else None,
                 steps=self._extract_body(node.body),
+                decorators=tuple(_compact_ast_text(self._source_unit.content, decorator).removeprefix("@") for decorator in node.decorator_list),
             )
         )
 
@@ -450,6 +475,7 @@ class _AstControlFlowVisitor(ast.NodeVisitor):
                 signature=f"async def {node.name}(...)",
                 container=".".join(self._containers) if self._containers else None,
                 steps=self._extract_body(node.body),
+                decorators=tuple(_compact_ast_text(self._source_unit.content, decorator).removeprefix("@") for decorator in node.decorator_list),
             )
         )
 

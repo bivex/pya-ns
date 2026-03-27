@@ -51,6 +51,7 @@ class HtmlNassiDiagramRenderer(NassiDiagramRenderer):
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Nassi-Shneiderman Control Flow</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23111827'/%3E%3Cpath d='M18 14h28v12L32 48 18 26Z' fill='%2382aaff' stroke='%23cfd8f6' stroke-width='2'/%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
@@ -215,6 +216,24 @@ class HtmlNassiDiagramRenderer(NassiDiagramRenderer):
         font-weight: 600;
         color: var(--text-bright);
         line-height: 1.3;
+      }}
+      .function-meta {{
+        margin-top: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }}
+      .decorator-badge {{
+        display: inline-flex;
+        align-items: center;
+        padding: 3px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(196, 167, 255, 0.34);
+        background: rgba(196, 167, 255, 0.12);
+        color: var(--purple);
+        font-family: var(--mono);
+        font-size: 11px;
+        line-height: 1.2;
       }}
       .function-signature {{
         margin-top: 5px;
@@ -573,6 +592,7 @@ class HtmlNassiDiagramRenderer(NassiDiagramRenderer):
             f'<h2 class="function-title">{escape(function.qualified_name)}</h2>'
             '<span class="collapse-toggle">Collapse</span>'
             "</div>"
+            f"{self._render_function_meta(function.decorators)}"
             f'<div class="function-signature">{escape(function.signature)}</div>'
             "</summary>"
             '<div class="function-body">'
@@ -586,6 +606,15 @@ class HtmlNassiDiagramRenderer(NassiDiagramRenderer):
             return '<div class="empty">No structured steps.</div>'
         rendered = "".join(self._render_step(step, depth=depth) for step in steps)
         return f'<div class="ns-sequence ns-depth-{depth}">{rendered}</div>'
+
+    def _render_function_meta(self, decorators: tuple[str, ...]) -> str:
+        if not decorators:
+            return ""
+        badges = "".join(
+            f'<span class="decorator-badge">@{escape(decorator)}</span>'
+            for decorator in decorators
+        )
+        return f'<div class="function-meta">{badges}</div>'
 
     def _render_step(self, step: ControlFlowStep, *, depth: int) -> str:
         if isinstance(step, ActionFlowStep):
@@ -760,7 +789,7 @@ class HtmlNassiDiagramRenderer(NassiDiagramRenderer):
 
         return (
             f'<div class="ns-node ns-switch ns-if-depth-{d}">'
-            f'<div class="ns-switch-header">{badge} switch {escape(step.expression)}</div>'
+            f'<div class="ns-switch-header">{badge} match {escape(step.expression)}</div>'
             f'<div class="ns-switch-cases">{"".join(cases_html)}</div>'
             "</div>"
         )

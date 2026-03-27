@@ -17,12 +17,34 @@ def traced(label: str):
     return decorate
 
 
+def audit(event_name: str):
+    def decorate(func):
+        def wrapper(*args, **kwargs):
+            print(f"audit:{event_name}")
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorate
+
+
 @dataclass
 class TourConfig:
     root: Path
     retries: int = 2
 
+    @property
+    def workspace_name(self) -> str:
+        match self.root.name:
+            case name if name.startswith("."):
+                return "hidden-workspace"
+            case "":
+                return "filesystem-root"
+            case name:
+                return name
 
+
+@audit("scan")
 @traced("tour")
 def scan_workspace(config: TourConfig) -> list[str]:
     discovered: list[str] = []
@@ -98,3 +120,12 @@ def resilient_summary(config: TourConfig) -> str:
             attempt += 1
 
     return "saved:unavailable"
+
+
+def feature_tour(root: Path) -> str:
+    config = TourConfig(root=root, retries=3)
+
+    if config.workspace_name == "hidden-workspace":
+        return "skip:hidden"
+
+    return resilient_summary(config)

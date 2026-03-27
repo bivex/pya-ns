@@ -70,6 +70,7 @@ class FunctionControlFlow:
     signature: str
     container: str | None
     steps: tuple[ControlFlowStep, ...]
+    decorators: tuple[str, ...] = ()
 
     @property
     def qualified_name(self) -> str:
