@@ -1,9 +1,13 @@
-"""Feature tour for Pya parsing and control-flow visualization."""
+"""Feature tour for the capabilities currently supported by Pya."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+
+
+APP_NAME = "pya-feature-tour"
+DEFAULT_RETRIES = 3
 
 
 def traced(label: str):
@@ -31,26 +35,32 @@ def audit(event_name: str):
 @dataclass
 class TourConfig:
     root: Path
-    retries: int = 2
+    retries: int = DEFAULT_RETRIES
+    include_hidden: bool = False
 
     @property
     def workspace_name(self) -> str:
         match self.root.name:
-            case name if name.startswith("."):
+            case ".git" | ".venv" | ".cache":
                 return "hidden-workspace"
             case "":
                 return "filesystem-root"
-            case name:
-                return name
+            case _:
+                return self.root.name
+
+    def report_path(self) -> Path:
+        return self.root / "feature-tour-report.txt"
 
 
 @audit("scan")
-@traced("tour")
+@traced("scan")
 def scan_workspace(config: TourConfig) -> list[str]:
     discovered: list[str] = []
 
     for path in sorted(config.root.iterdir()):
-        if path.is_dir():
+        if path.name.startswith(".") and not config.include_hidden:
+            continue
+        elif path.is_dir():
             discovered.append(f"dir:{path.name}")
         else:
             discovered.append(f"file:{path.name}")
@@ -60,12 +70,12 @@ def scan_workspace(config: TourConfig) -> list[str]:
 
 def classify_entry(entry: str) -> str:
     match entry.split(":", 1):
-        case ["dir", name] if name.startswith("."):
-            return "hidden-directory"
         case ["dir", _]:
             return "directory"
-        case ["file", name] if name.endswith(".py"):
+        case ["file", _] if entry.endswith(".py"):
             return "python-file"
+        case ["file", _] if entry.endswith(".md"):
+            return "markdown-file"
         case ["file", _]:
             return "other-file"
         case _:
@@ -76,6 +86,7 @@ def build_report(config: TourConfig) -> dict[str, int]:
     stats = {
         "directories": 0,
         "python_files": 0,
+        "markdown_files": 0,
         "other_files": 0,
         "errors": 0,
     }
@@ -92,6 +103,8 @@ def build_report(config: TourConfig) -> dict[str, int]:
             stats["directories"] += 1
         elif kind == "python-file":
             stats["python_files"] += 1
+        elif kind == "markdown-file":
+            stats["markdown_files"] += 1
         else:
             stats["other_files"] += 1
 
@@ -99,7 +112,7 @@ def build_report(config: TourConfig) -> dict[str, int]:
 
 
 def persist_report(config: TourConfig, report: dict[str, int]) -> str:
-    output_path = config.root / "feature-tour-report.txt"
+    output_path = config.report_path()
 
     with output_path.open("w", encoding="utf-8") as handle:
         for key, value in report.items():
@@ -122,10 +135,26 @@ def resilient_summary(config: TourConfig) -> str:
     return "saved:unavailable"
 
 
+async def collect_async_entries(config: TourConfig) -> list[str]:
+    entries = scan_workspace(config)
+    await mark_async_boundary(config.workspace_name)
+    return entries
+
+
+async def mark_async_boundary(label: str) -> None:
+    print(f"async:{label}")
+
+
+def evaluate_workspace(config: TourConfig) -> str:
+    match config.workspace_name:
+        case "hidden-workspace":
+            return "skip:hidden"
+        case "filesystem-root":
+            return "scan:root"
+        case _:
+            return resilient_summary(config)
+
+
 def feature_tour(root: Path) -> str:
-    config = TourConfig(root=root, retries=3)
-
-    if config.workspace_name == "hidden-workspace":
-        return "skip:hidden"
-
-    return resilient_summary(config)
+    config = TourConfig(root=root, retries=DEFAULT_RETRIES)
+    return evaluate_workspace(config)
