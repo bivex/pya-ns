@@ -31,25 +31,16 @@ from pya.infrastructure.antlr.runtime import (
 @dataclass(frozen=True, slots=True)
 class _ExtractorContext:
     token_stream: object
+    source_text: str = ""
 
     def text(self, ctx) -> str:
         if ctx is None:
             return ""
-        # Reconstruct text including hidden channel tokens (whitespace)
-        tokens = self.token_stream.getTokens(
-            start=ctx.start.tokenIndex,
-            stop=ctx.stop.tokenIndex,
-        )
-        parts = []
-        for token in tokens:
-            parts.append(token.text)
-        text = "".join(parts)
-        # If the reconstructed text has no spaces but has multiple tokens,
-        # add spaces between tokens (ANTLR doesn't include whitespace in tokens)
-        if len(tokens) > 1 and " " not in text and text.isalnum() or any(c in text for c in "=<>+-*/%&|^~!"):
-            # Reconstruct with spaces between tokens
-            text = " ".join(token.text for token in tokens)
-        return text
+        start = getattr(ctx.start, "start", None)
+        stop = getattr(ctx.stop, "stop", None)
+        if start is None or stop is None or start < 0 or stop < start:
+            return ctx.getText()
+        return self.source_text[start : stop + 1]
 
     def compact(self, ctx, *, limit: int = 95) -> str:
         # Get original text with whitespace
@@ -76,7 +67,10 @@ class AntlrPythonControlFlowExtractor(PythonControlFlowExtractor):
                 return _extract_with_ast(source_unit)
             visitor = _build_control_flow_visitor(
                 self._generated.visitor_type,
-                _ExtractorContext(token_stream=parse_result.token_stream),
+                _ExtractorContext(
+                    token_stream=parse_result.token_stream,
+                    source_text=source_unit.content,
+                ),
             )()
             visitor.visit(parse_result.tree)
             return ControlFlowDiagram(

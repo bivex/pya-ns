@@ -21,7 +21,7 @@ from pya.domain.model import (
 from pya.domain.ports import PythonSyntaxParser
 
 
-CACHE_FORMAT_VERSION = "parser-cache-v2"
+CACHE_FORMAT_VERSION = "parser-cache-v3"
 
 
 class CachedPythonSyntaxParser(PythonSyntaxParser):

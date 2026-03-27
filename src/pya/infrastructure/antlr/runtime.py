@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import re
 from dataclasses import dataclass
 
 from antlr4 import CommonTokenStream, InputStream
@@ -107,7 +108,7 @@ def _parse_entry_text_fast(
         token_stream=token_stream,
         parser=parser,
         tree=tree,
-        diagnostics=tuple(lexer_errors.diagnostics),
+        diagnostics=_normalize_diagnostics(tuple(lexer_errors.diagnostics)),
     )
 
 
@@ -134,5 +135,27 @@ def _parse_entry_text_full(
         token_stream=token_stream,
         parser=parser,
         tree=tree,
-        diagnostics=tuple(lexer_errors.diagnostics + parser_errors.diagnostics),
+        diagnostics=_normalize_diagnostics(tuple(lexer_errors.diagnostics + parser_errors.diagnostics)),
     )
+
+
+def _normalize_diagnostics(
+    diagnostics: tuple[SyntaxDiagnostic, ...],
+) -> tuple[SyntaxDiagnostic, ...]:
+    filtered: list[SyntaxDiagnostic] = []
+    for diagnostic in diagnostics:
+        if _is_layout_noise(diagnostic):
+            continue
+        filtered.append(diagnostic)
+    return tuple(filtered)
+
+
+def _is_layout_noise(diagnostic: SyntaxDiagnostic) -> bool:
+    message = diagnostic.message
+    if not message.startswith("extraneous input "):
+        return False
+    match = re.search(r"extraneous input '([^']*)'", message)
+    if match is None:
+        return False
+    payload = match.group(1)
+    return payload == "" or payload.isspace() and "\n" not in payload and "\r" not in payload
