@@ -13,25 +13,31 @@ The project starts from the domain, not from the framework:
 
 | Feature | Priority | Status |
 |---------|----------|--------|
-| Parse one Python file | p0 | done |
-| Parse a directory of Python files | p0 | done |
-| Structural model: imports, functions, classes, variables | p0 | done |
-| Syntax diagnostics as part of the parse contract | p0 | done |
-| Versioned JSON output | p0 | done |
-| Async function extraction (`async def`) | p0 | done |
-| Control flow extraction (if/elif/else, while, for, try/except, with) | p1 | done |
-| Nassi-Shneiderman HTML diagrams per file | p1 | done |
-| Nassi-Shneiderman HTML diagram bundles for directories | p1 | done |
-| Depth-coded nested conditionals (up to 50 levels) | p1 | done |
-| Dark Tokyo Night theme with JetBrains Mono | p1 | done |
-| match/case control flow (Python 3.10+) | p1 | done |
-| Decorator extraction | p1 | done |
-| Symbol graph / cross-reference export | p3 | done |
-| Semantic passes (type inference, call graph) | p3 | done |
-| Incremental parsing and caching | p3 | done |
-| Interactive HTML diagrams with collapsible nodes | p3 | done |
-| Export to other diagram formats (SVG, PNG, Mermaid) | p3 | done |
-| Integration adapters for external analysis tools | p3 | done |
+| 📄 Parse one Python file | `P0` | ✅ Done |
+| 📁 Parse a directory of Python files | `P0` | ✅ Done |
+| 🔎 Recursive source discovery while ignoring non-Python files | `P0` | ✅ Done |
+| 🧱 Structural model: imports, functions, classes, variables | `P0` | ✅ Done |
+| ⚠️ Syntax diagnostics as part of the parse contract | `P0` | ✅ Done |
+| 🧾 Versioned JSON output | `P0` | ✅ Done |
+| 🧮 Aggregate parsing job report across source units | `P0` | ✅ Done |
+| 🏷️ Explicit grammar version and report schema version in results | `P0` | ✅ Done |
+| 🚦 Distinct parse statuses for success, diagnostics, and technical failure | `P0` | ✅ Done |
+| 🌀 Async function extraction (`async def`) | `P0` | ✅ Done |
+| 🌿 Control flow extraction (if/elif/else, while, for, try/except, with) | `P1` | ✅ Done |
+| 🧩 match/case control flow (Python 3.10+) | `P1` | ✅ Done |
+| 🎀 Decorator extraction | `P1` | ✅ Done |
+| 🗂️ Nassi-Shneiderman HTML diagrams per file | `P1` | ✅ Done |
+| 🗃️ Nassi-Shneiderman HTML diagram bundles for directories | `P1` | ✅ Done |
+| 📏 Depth-coded nested conditionals (up to 50 levels) | `P1` | ✅ Done |
+| 🌃 Dark Tokyo Night theme with JetBrains Mono | `P1` | ✅ Done |
+| 🕸️ Symbol graph / cross-reference export | `P3` | ✅ Done |
+| 🧠 Semantic passes (type inference, call graph) | `P3` | ✅ Done |
+| ⚡ Incremental parsing and caching | `P3` | ✅ Done |
+| 🪟 Interactive HTML diagrams with collapsible nodes | `P3` | ✅ Done |
+| 🖼️ Export to other diagram formats (SVG, PNG, Mermaid) | `P3` | ✅ Done |
+| 🔌 Integration adapters for external analysis tools | `P3` | ✅ Done |
+
+Note: the old [requirements doc](docs/requirements.md) is still written against an earlier Swift-oriented draft, so the matrix above reflects the actual Python implementation rather than that stale wording.
 
 ## What the system does
 
