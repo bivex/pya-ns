@@ -4,6 +4,7 @@ from pathlib import Path
 
 from pya.application.analysis import AnalyzeFileCommand, SemanticAnalysisService
 from pya.infrastructure.analysis.ast_semantic_analyzer import AstPythonSemanticAnalyzer
+from pya.infrastructure.antlr.parser_adapter import AntlrPythonSyntaxParser
 from pya.infrastructure.filesystem.source_repository import FileSystemSourceRepository
 
 
@@ -14,6 +15,7 @@ def _build_service() -> SemanticAnalysisService:
     return SemanticAnalysisService(
         source_repository=FileSystemSourceRepository(),
         analyzer=AstPythonSemanticAnalyzer(),
+        parser=AntlrPythonSyntaxParser(),
     )
 
 
@@ -24,6 +26,7 @@ def test_analysis_service_extracts_symbols_references_and_semantics() -> None:
     )
 
     assert document.symbol_count >= 4
+    assert document.payload["parse_status"] in {"succeeded", "succeeded_with_diagnostics"}
     assert any(symbol["kind"] == "decorator" for symbol in document.payload["symbols"])
     assert any(reference["relationship"] == "decorates" for reference in document.payload["references"])
     assert any(function["qualified_name"] == "greet" for function in document.payload["functions"])
@@ -112,6 +115,9 @@ def test_analysis_file_survives_invalid_file_with_diagnostics() -> None:
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     assert payload["status"] == "failed"
+    assert payload["parse_status"] == "succeeded_with_diagnostics"
+    assert payload["grammar_version"]
+    assert payload["parse_statistics"]["diagnostic_count"] >= 1
     assert payload["diagnostics"]
     assert payload["error"]["kind"] == "syntax_error"
 
@@ -160,3 +166,124 @@ def test_analysis_file_infers_common_python_types() -> None:
     functions = {function["qualified_name"]: function for function in payload["functions"]}
     assert functions["format_summary"]["inferred_return_type"] == "str"
     assert functions["helper_label"]["inferred_return_type"] == "str"
+
+
+def test_analysis_dir_resolves_package_reexports_and_prefers_local_calls(tmp_path: Path) -> None:
+    pkg_dir = tmp_path / "pkg"
+    pkg_dir.mkdir()
+    (pkg_dir / "__init__.py").write_text(
+        "from pkg.helpers import exported_summary\n",
+        encoding="utf-8",
+    )
+    (pkg_dir / "helpers.py").write_text(
+        "\n".join(
+            [
+                "def exported_summary(value: str) -> str:",
+                '    return f"pkg:{value}"',
+                "",
+                "def shared() -> str:",
+                '    return "pkg-shared"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "other.py").write_text(
+        "\n".join(
+            [
+                "def shared() -> str:",
+                '    return "other-shared"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "consumer.py").write_text(
+        "\n".join(
+            [
+                "from pkg import exported_summary",
+                "",
+                "def shared() -> str:",
+                '    return "local-shared"',
+                "",
+                "def run() -> str:",
+                '    return exported_summary(shared())',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "pya",
+            "analyze-dir",
+            str(tmp_path),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    bundle_references = payload["bundle_references"]
+    relationships = {reference["relationship"] for reference in bundle_references}
+    assert "calls_import" in relationships
+    assert "calls_local" in relationships
+    target_ids = {reference["target_id"] for reference in bundle_references}
+    assert any("pkg/helpers.py::function::exported_summary" in target for target in target_ids)
+    assert any("consumer.py::function::shared" in target for target in target_ids)
+
+
+def test_analysis_dir_skips_ambiguous_global_call_resolution(tmp_path: Path) -> None:
+    (tmp_path / "alpha.py").write_text(
+        "\n".join(
+            [
+                "def ping() -> str:",
+                '    return "alpha"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "beta.py").write_text(
+        "\n".join(
+            [
+                "def ping() -> str:",
+                '    return "beta"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "consumer.py").write_text(
+        "\n".join(
+            [
+                "def call_ping() -> str:",
+                "    return ping()",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "pya",
+            "analyze-dir",
+            str(tmp_path),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    call_ping_refs = [
+        reference
+        for reference in payload["bundle_references"]
+        if "consumer.py::function::call_ping" in reference["source_id"]
+    ]
+    assert not any(reference["relationship"] == "calls_resolved" for reference in call_ping_refs)

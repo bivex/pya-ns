@@ -213,6 +213,7 @@ def _build_analysis_service() -> SemanticAnalysisService:
     return SemanticAnalysisService(
         source_repository=FileSystemSourceRepository(),
         analyzer=AstPythonSemanticAnalyzer(),
+        parser=AntlrPythonSyntaxParser(),
     )
 
 
