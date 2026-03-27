@@ -68,7 +68,7 @@ def _build_structure_visitor(visitor_base: type) -> type:
             self._containers: list[str] = []
 
         def visitFuncdef(self, ctx):
-            name = ctx.NAME().getText()
+            name = ctx.name().NAME().getText() if ctx.name() and ctx.name().NAME() else "unknown"
             self._append(
                 StructuralElementKind.FUNCTION,
                 name,
@@ -79,7 +79,7 @@ def _build_structure_visitor(visitor_base: type) -> type:
 
         def visitAsync_funcdef(self, ctx):
             funcdef = ctx.funcdef()
-            name = funcdef.NAME().getText()
+            name = funcdef.name().NAME().getText() if funcdef and funcdef.name() and funcdef.name().NAME() else "unknown"
             self._append(
                 StructuralElementKind.ASYNC_FUNCTION,
                 name,
@@ -89,7 +89,7 @@ def _build_structure_visitor(visitor_base: type) -> type:
             return None
 
         def visitClassdef(self, ctx):
-            name = ctx.NAME().getText()
+            name = ctx.name().NAME().getText() if ctx.name() and ctx.name().NAME() else "unknown"
             self._append(StructuralElementKind.CLASS, name, ctx, signature=f"class {name}")
             return self._with_container(name, lambda: self.visitChildren(ctx))
 

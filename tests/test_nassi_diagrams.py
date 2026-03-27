@@ -318,9 +318,9 @@ def test_nassi_cli_writes_html_file(tmp_path: Path) -> None:
 
     result = subprocess.run(
         [
-            sys.executable,
-            "-m",
-            "pya.presentation.cli.main",
+            "uv",
+            "run",
+            "pya",
             "nassi-file",
             str(ROOT / "tests" / "fixtures" / "control_flow.py"),
             "--out",
@@ -346,9 +346,9 @@ def test_nassi_dir_cli_writes_html_bundle(tmp_path: Path) -> None:
 
     result = subprocess.run(
         [
-            sys.executable,
-            "-m",
-            "pya.presentation.cli.main",
+            "uv",
+            "run",
+            "pya",
             "nassi-dir",
             str(ROOT / "tests" / "fixtures"),
             "--out",

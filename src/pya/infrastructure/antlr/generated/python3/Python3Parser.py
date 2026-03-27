@@ -5592,9 +5592,9 @@ class Python3Parser ( Python3ParserBase ):
                 self.state = 865
                 self.signed_number()
                 self.state = 866
-                if not  this.CannotBePlusMinus() :
+                if not  self.CannotBePlusMinus() :
                     from antlr4.error.Errors import FailedPredicateException
-                    raise FailedPredicateException(self, " this.CannotBePlusMinus() ")
+                    raise FailedPredicateException(self, " self.CannotBePlusMinus() ")
                 pass
 
             elif la_ == 2:
@@ -5690,9 +5690,9 @@ class Python3Parser ( Python3ParserBase ):
                 self.state = 875
                 self.signed_number()
                 self.state = 876
-                if not  this.CannotBePlusMinus() :
+                if not  self.CannotBePlusMinus() :
                     from antlr4.error.Errors import FailedPredicateException
-                    raise FailedPredicateException(self, " this.CannotBePlusMinus() ")
+                    raise FailedPredicateException(self, " self.CannotBePlusMinus() ")
                 pass
 
             elif la_ == 2:
@@ -6071,9 +6071,9 @@ class Python3Parser ( Python3ParserBase ):
             self.state = 911
             self.name()
             self.state = 912
-            if not  this.CannotBeDotLpEq() :
+            if not  self.CannotBeDotLpEq() :
                 from antlr4.error.Errors import FailedPredicateException
-                raise FailedPredicateException(self, " this.CannotBeDotLpEq() ")
+                raise FailedPredicateException(self, " self.CannotBeDotLpEq() ")
         except RecognitionException as re:
             localctx.exception = re
             self._errHandler.reportError(self, re)
@@ -6154,9 +6154,9 @@ class Python3Parser ( Python3ParserBase ):
             self.state = 916
             self.attr()
             self.state = 917
-            if not  this.CannotBeDotLpEq() :
+            if not  self.CannotBeDotLpEq() :
                 from antlr4.error.Errors import FailedPredicateException
-                raise FailedPredicateException(self, " this.CannotBeDotLpEq() ")
+                raise FailedPredicateException(self, " self.CannotBeDotLpEq() ")
         except RecognitionException as re:
             localctx.exception = re
             self._errHandler.reportError(self, re)
@@ -10044,22 +10044,22 @@ class Python3Parser ( Python3ParserBase ):
 
     def literal_pattern_sempred(self, localctx:Literal_patternContext, predIndex:int):
             if predIndex == 0:
-                return  this.CannotBePlusMinus() 
+                return  self.CannotBePlusMinus() 
          
 
     def literal_expr_sempred(self, localctx:Literal_exprContext, predIndex:int):
             if predIndex == 1:
-                return  this.CannotBePlusMinus() 
+                return  self.CannotBePlusMinus() 
          
 
     def pattern_capture_target_sempred(self, localctx:Pattern_capture_targetContext, predIndex:int):
             if predIndex == 2:
-                return  this.CannotBeDotLpEq() 
+                return  self.CannotBeDotLpEq() 
          
 
     def value_pattern_sempred(self, localctx:Value_patternContext, predIndex:int):
             if predIndex == 3:
-                return  this.CannotBeDotLpEq() 
+                return  self.CannotBeDotLpEq() 
          
 
     def expr_sempred(self, localctx:ExprContext, predIndex:int):

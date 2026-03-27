@@ -6,7 +6,7 @@ The project starts from the domain, not from the framework:
 
 * business goal: convert Python source into a stable structural model for downstream tooling
 * architectural style: DDD-inspired layered monolith with hexagonal boundaries
-* parser engine: ANTLR4 with the public Python3 grammar from `antlr/grammars-v4`, requiring no compatibility patches
+* parser engine: ANTLR4 with the public Python3 grammar from `antlr/grammars-v4`, with Java→Python compatibility patches
 * current delivery channel: CLI that parses a file or a directory and returns versioned JSON
 
 ## Feature Matrix
@@ -85,6 +85,7 @@ The Nassi-Shneiderman diagrams include:
 * **Smart parsing**
   * Fast path for simple function bodies
   * Fallback to full-file parse when lightweight scanner cannot isolate function bodies
+  * Handles Python's significant whitespace via the ANTLR grammar's built-in NEWLINE/INDENT/DEDENT tokens
 
 ### Screenshots
 
@@ -115,7 +116,7 @@ See the full design docs in [docs/domain-and-goals.md](docs/domain-and-goals.md)
 uv sync --extra dev
 ```
 
-2. Vendor the Python3 grammar from `antlr/grammars-v4/python/python3` into `resources/grammars/python3/`, then generate the parser:
+2. The Python3 grammar files are already vendored in `resources/grammars/python3/` and the parser is pre-generated. To regenerate:
 
 ```bash
 uv run python scripts/generate_python_parser.py
@@ -147,7 +148,7 @@ uv run pya nassi-dir path/to/project --out output/nassi-bundle
 
 ## Constraints and honesty
 
-The grammar is sourced from `antlr/grammars-v4/python/python3`. It targets the Python 3 grammar and is maintained by the antlr/grammars-v4 community. The grammar does not require compatibility patches for Python target generation. Pya makes grammar limitations explicit in requirements, ADRs, and runtime metadata so downstream consumers know what contract they are integrating with.
+The grammar is sourced from `antlr/grammars-v4/python/python3`. It targets the Python 3 grammar and is maintained by the antlr/grammars-v4 community. The upstream grammar includes embedded actions with Java-specific syntax (e.g., `this.` references) that require compatibility patches for Python target generation. Pya applies these patches automatically during parser generation via `scripts/generate_python_parser.py`. Pya makes grammar limitations explicit in requirements, ADRs, and runtime metadata so downstream consumers know what contract they are integrating with.
 
 ## Next Steps
 

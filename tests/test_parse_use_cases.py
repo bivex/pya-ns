@@ -86,9 +86,9 @@ def test_cli_outputs_json() -> None:
     _ensure_generated_parser()
     result = subprocess.run(
         [
-            sys.executable,
-            "-m",
-            "pya.presentation.cli.main",
+            "uv",
+            "run",
+            "pya",
             "parse-file",
             str(ROOT / "tests" / "fixtures" / "valid.py"),
         ],

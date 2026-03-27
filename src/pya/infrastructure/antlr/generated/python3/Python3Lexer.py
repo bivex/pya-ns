@@ -739,37 +739,37 @@ class Python3Lexer(Python3LexerBase):
 
     def NEWLINE_action(self, localctx:RuleContext , actionIndex:int):
         if actionIndex == 0:
-            this.onNewLine();
+            self.onNewLine();
      
 
     def OPEN_PAREN_action(self, localctx:RuleContext , actionIndex:int):
         if actionIndex == 1:
-            this.openBrace();
+            self.openBrace();
      
 
     def CLOSE_PAREN_action(self, localctx:RuleContext , actionIndex:int):
         if actionIndex == 2:
-            this.closeBrace();
+            self.closeBrace();
      
 
     def OPEN_BRACK_action(self, localctx:RuleContext , actionIndex:int):
         if actionIndex == 3:
-            this.openBrace();
+            self.openBrace();
      
 
     def CLOSE_BRACK_action(self, localctx:RuleContext , actionIndex:int):
         if actionIndex == 4:
-            this.closeBrace();
+            self.closeBrace();
      
 
     def OPEN_BRACE_action(self, localctx:RuleContext , actionIndex:int):
         if actionIndex == 5:
-            this.openBrace();
+            self.openBrace();
      
 
     def CLOSE_BRACE_action(self, localctx:RuleContext , actionIndex:int):
         if actionIndex == 6:
-            this.closeBrace();
+            self.closeBrace();
      
 
     def sempred(self, localctx:RuleContext, ruleIndex:int, predIndex:int):
@@ -785,7 +785,7 @@ class Python3Lexer(Python3LexerBase):
 
     def NEWLINE_sempred(self, localctx:RuleContext, predIndex:int):
             if predIndex == 0:
-                return this.atStartOfInput()
+                return self.atStartOfInput()
          
 
 
