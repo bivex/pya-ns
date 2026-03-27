@@ -51,7 +51,7 @@ class _ExtractorContext:
             text = " ".join(token.text for token in tokens)
         return text
 
-    def compact(self, ctx, *, limit: int = 96) -> str:
+    def compact(self, ctx, *, limit: int = 95) -> str:
         # Get original text with whitespace
         text = self.text(ctx)
         # Strip leading/trailing whitespace but preserve internal spacing
@@ -60,7 +60,9 @@ class _ExtractorContext:
         text = re.sub(r"  +", " ", text)
         if len(text) <= limit:
             return text
-        return f"{text[: limit - 1]}..."
+        if limit <= 3:
+            return "." * limit
+        return f"{text[: limit - 3]}..."
 
 
 class AntlrPythonControlFlowExtractor(PythonControlFlowExtractor):
@@ -70,6 +72,8 @@ class AntlrPythonControlFlowExtractor(PythonControlFlowExtractor):
     def extract(self, source_unit: SourceUnit) -> ControlFlowDiagram:
         try:
             parse_result = parse_source_text(source_unit.content, self._generated)
+            if parse_result.diagnostics:
+                return _extract_with_ast(source_unit)
             visitor = _build_control_flow_visitor(
                 self._generated.visitor_type,
                 _ExtractorContext(token_stream=parse_result.token_stream),
@@ -568,14 +572,16 @@ class _AstControlFlowVisitor(ast.NodeVisitor):
         return ActionFlowStep(_compact_ast_text(self._source_unit.content, statement))
 
 
-def _compact_ast_text(source_text: str, node: ast.AST | None, *, limit: int = 96) -> str:
+def _compact_ast_text(source_text: str, node: ast.AST | None, *, limit: int = 95) -> str:
     if node is None:
         return ""
     text = ast.get_source_segment(source_text, node) or ast.unparse(node)
     text = re.sub(r"\s+", " ", text).strip()
     if len(text) <= limit:
         return text
-    return f"{text[: limit - 1]}..."
+    if limit <= 3:
+        return "." * limit
+    return f"{text[: limit - 3]}..."
 
 
 def _ast_except_pattern(source_text: str, handler: ast.ExceptHandler) -> str:

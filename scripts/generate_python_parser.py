@@ -126,7 +126,22 @@ class Python3LexerBase(Lexer):
         encoding="utf-8",
     )
     (OUTPUT_DIR / "Python3ParserBase.py").write_text(
-        '"""Base class for Python3Parser."""\n\nfrom antlr4.Parser import Parser\n\n\nclass Python3ParserBase(Parser):\n    """Base class for Python3 parser."""\n    pass\n',
+        '''"""Base class for Python3Parser."""
+
+from antlr4.Parser import Parser
+
+
+class Python3ParserBase(Parser):
+    """Base class for Python3 parser."""
+
+    def CannotBePlusMinus(self) -> bool:
+        next_token = self._input.LT(1)
+        return getattr(next_token, "text", None) not in {"+", "-"}
+
+    def CannotBeDotLpEq(self) -> bool:
+        next_token = self._input.LT(1)
+        return getattr(next_token, "text", None) not in {".", "(", "="}
+''',
         encoding="utf-8",
     )
 

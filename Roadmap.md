@@ -39,7 +39,7 @@ This roadmap reflects the actual state of the Python implementation in this repo
 
 These areas are present, but not fully aligned with what the vendored ANTLR grammar could theoretically support.
 
-* `match`/`case` works in product behavior, but currently relies on AST fallback when the generated ANTLR parser hits Python-target compatibility gaps in pattern matching actions.
+* `match`/`case` no longer hard-crashes the generated parser path, but complex files can still produce ANTLR diagnostics, so control-flow extraction intentionally falls back to AST when the parse is noisy.
 * Cross-file resolution is now available at directory-analysis level for straightforward local imports and known symbol names, but it is still heuristic rather than a full binder.
 * Type inference still focuses on literals, annotations, and simple call-based guesses.
 
@@ -47,9 +47,8 @@ These areas are present, but not fully aligned with what the vendored ANTLR gram
 
 ### Near-term
 
-* Remove the remaining ANTLR/Python target gap for pattern matching, so `match` no longer depends on AST fallback
-* Strengthen cross-file resolution for aliases, package imports, and ambiguous names
-* Surface analysis diagnostics explicitly in `analyze-file` as well as `analyze-dir`
+* Strengthen cross-file resolution for ambiguous names and broader package graphs
+* Surface parser-backed diagnostics inside semantic analysis beyond raw syntax failures
 
 ### Later
 

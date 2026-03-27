@@ -94,6 +94,28 @@ def test_analysis_dir_resolves_cross_file_references_and_survives_invalid_files(
     assert any(document.get("error") for document in payload["documents"])
 
 
+def test_analysis_file_survives_invalid_file_with_diagnostics() -> None:
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "pya",
+            "analyze-file",
+            str(ROOT / "tests" / "fixtures" / "invalid.py"),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "failed"
+    assert payload["diagnostics"]
+    assert payload["error"]["kind"] == "syntax_error"
+
+
 def test_analysis_dir_resolves_local_imports_across_example_files() -> None:
     result = subprocess.run(
         [

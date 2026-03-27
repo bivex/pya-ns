@@ -43,13 +43,16 @@ class SemanticAnalysisService:
 
     def analyze_file(self, command: AnalyzeFileCommand) -> SemanticAnalysisDocumentDTO:
         source_unit = self.source_repository.load_file(command.path)
-        analysis = self.analyzer.analyze(source_unit)
-        payload = _analysis_to_dict(analysis)
+        try:
+            analysis = self.analyzer.analyze(source_unit)
+            payload = _analysis_to_dict(analysis)
+        except SyntaxError as error:
+            payload = _syntax_error_document(source_unit, error)
         return SemanticAnalysisDocumentDTO(
-            source_location=analysis.source_location,
-            symbol_count=len(analysis.symbols),
-            reference_count=len(analysis.references),
-            function_count=len(analysis.functions),
+            source_location=str(payload["source_location"]),
+            symbol_count=len(payload["symbols"]),
+            reference_count=len(payload["references"]),
+            function_count=len(payload["functions"]),
             payload=payload,
         )
 
@@ -64,20 +67,7 @@ class SemanticAnalysisService:
                 analysis = self.analyzer.analyze(source_unit)
             except SyntaxError as error:
                 failure_count += 1
-                documents.append(
-                    {
-                        "source_location": source_unit.location,
-                        "symbols": [],
-                        "references": [],
-                        "functions": [],
-                        "error": {
-                            "kind": "syntax_error",
-                            "message": str(error),
-                            "line": getattr(error, "lineno", 0) or 0,
-                            "column": getattr(error, "offset", 0) or 0,
-                        },
-                    }
-                )
+                documents.append(_syntax_error_document(source_unit, error))
                 continue
 
             successful_analyses.append(analysis)
@@ -102,6 +92,8 @@ class SemanticAnalysisService:
 def _analysis_to_dict(analysis: SemanticAnalysis) -> dict[str, object]:
     return {
         "source_location": analysis.source_location,
+        "status": "succeeded",
+        "diagnostics": [],
         "symbols": [
             {
                 "symbol_id": symbol.symbol_id,
@@ -144,6 +136,32 @@ def _analysis_to_dict(analysis: SemanticAnalysis) -> dict[str, object]:
             }
             for function in analysis.functions
         ],
+    }
+
+
+def _syntax_error_document(source_unit, error: SyntaxError) -> dict[str, object]:
+    message = str(error)
+    line = getattr(error, "lineno", 0) or 0
+    column = getattr(error, "offset", 0) or 0
+    diagnostic = {
+        "severity": "error",
+        "message": message,
+        "line": line,
+        "column": column,
+    }
+    return {
+        "source_location": source_unit.location,
+        "status": "failed",
+        "diagnostics": [diagnostic],
+        "symbols": [],
+        "references": [],
+        "functions": [],
+        "error": {
+            "kind": "syntax_error",
+            "message": message,
+            "line": line,
+            "column": column,
+        },
     }
 
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from pya.application.dto import ParseDirectoryCommand, ParseFileCommand
 from pya.application.use_cases import ParsingJobService
 from pya.infrastructure.antlr.parser_adapter import AntlrPythonSyntaxParser
+from pya.infrastructure.antlr.runtime import load_generated_types, parse_source_text
 from pya.infrastructure.filesystem.source_repository import FileSystemSourceRepository
 from pya.infrastructure.system import (
     InMemoryParsingJobRepository,
@@ -152,3 +153,15 @@ def test_parse_file_supports_match_case_via_structure_fallback() -> None:
         element["kind"] == "decorator"
         for element in payload["sources"][0]["structural_elements"]
     )
+    assert payload["sources"][0]["statistics"]["token_count"] > 0
+
+
+def test_antlr_runtime_parses_match_case_without_missing_base_methods() -> None:
+    _ensure_generated_parser()
+    generated = load_generated_types()
+    source_text = (ROOT / "examples" / "feature_tour.py").read_text(encoding="utf-8")
+
+    result = parse_source_text(source_text, generated)
+
+    assert result.tree is not None
+    assert len(result.token_stream.tokens) > 0
