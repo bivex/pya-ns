@@ -71,3 +71,45 @@ def test_analysis_cli_supports_graphviz_adapter() -> None:
 
     assert result.returncode == 0
     assert result.stdout.startswith("digraph pya")
+
+
+def test_analysis_dir_resolves_cross_file_references_and_survives_invalid_files() -> None:
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "pya",
+            "analyze-dir",
+            str(ROOT / "tests" / "fixtures"),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["failure_count"] == 1
+    assert any(document.get("error") for document in payload["documents"])
+
+
+def test_analysis_dir_resolves_local_imports_across_example_files() -> None:
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "pya",
+            "analyze-dir",
+            str(ROOT / "examples"),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    relationships = {reference["relationship"] for reference in payload["bundle_references"]}
+    assert "imports_local" in relationships or "calls_import" in relationships

@@ -40,23 +40,19 @@ This roadmap reflects the actual state of the Python implementation in this repo
 These areas are present, but not fully aligned with what the vendored ANTLR grammar could theoretically support.
 
 * `match`/`case` works in product behavior, but currently relies on AST fallback when the generated ANTLR parser hits Python-target compatibility gaps in pattern matching actions.
-* `try` captures `except` and `finally`, but `try ... else` is not modeled explicitly yet.
-* `for ... else` and `while ... else` are accepted by the grammar, but not yet represented as distinct control-flow branches.
-* `except ... as exc` aliases are not surfaced as first-class data in the control-flow model.
-* Annotated assignments such as `x: int = 1` are analyzed semantically, but are not yet promoted into the structural parse report the same way plain module assignments are.
+* Cross-file resolution is now available at directory-analysis level for straightforward local imports and known symbol names, but it is still heuristic rather than a full binder.
+* Type inference still focuses on literals, annotations, and simple call-based guesses.
 
 ## Next
 
 ### Near-term
 
-* Model loop `else` branches and `try ... else` in the control-flow domain
-* Improve exception clause extraction so `except ValueError as exc` is preserved accurately
-* Promote annotated module assignments into the structural parse contract
 * Remove the remaining ANTLR/Python target gap for pattern matching, so `match` no longer depends on AST fallback
+* Strengthen cross-file resolution for aliases, package imports, and ambiguous names
+* Surface analysis diagnostics explicitly in `analyze-file` as well as `analyze-dir`
 
 ### Later
 
-* Stronger cross-file symbol resolution and name binding
 * Richer type inference beyond literals, annotations, and simple call heuristics
 * Persistent repository-scale indexing
 * Closer visual parity between HTML and exported SVG/PNG

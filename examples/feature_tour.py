@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from feature_support import format_summary, helper_label
+
 
 APP_NAME = "pya-feature-tour"
 DEFAULT_RETRIES = 3
@@ -148,11 +150,11 @@ async def mark_async_boundary(label: str) -> None:
 def evaluate_workspace(config: TourConfig) -> str:
     match config.workspace_name:
         case "hidden-workspace":
-            return "skip:hidden"
+            return format_summary(config.workspace_name, helper_label("hidden"))
         case "filesystem-root":
-            return "scan:root"
+            return format_summary(config.workspace_name, helper_label("root"))
         case _:
-            return resilient_summary(config)
+            return format_summary(config.workspace_name, resilient_summary(config))
 
 
 def feature_tour(root: Path) -> str:

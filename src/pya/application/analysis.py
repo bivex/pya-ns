@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from pya.domain.analysis import SemanticAnalysis
 from pya.domain.ports import PythonSemanticAnalyzer, SourceRepository
@@ -54,14 +55,45 @@ class SemanticAnalysisService:
 
     def analyze_directory(self, command: AnalyzeDirectoryCommand) -> SemanticAnalysisBundleDTO:
         source_units = tuple(self.source_repository.list_python_sources(command.root_path))
-        analyses = tuple(self.analyzer.analyze(source_unit) for source_unit in source_units)
+        documents: list[dict[str, object]] = []
+        successful_analyses: list[SemanticAnalysis] = []
+        failure_count = 0
+
+        for source_unit in source_units:
+            try:
+                analysis = self.analyzer.analyze(source_unit)
+            except SyntaxError as error:
+                failure_count += 1
+                documents.append(
+                    {
+                        "source_location": source_unit.location,
+                        "symbols": [],
+                        "references": [],
+                        "functions": [],
+                        "error": {
+                            "kind": "syntax_error",
+                            "message": str(error),
+                            "line": getattr(error, "lineno", 0) or 0,
+                            "column": getattr(error, "offset", 0) or 0,
+                        },
+                    }
+                )
+                continue
+
+            successful_analyses.append(analysis)
+            documents.append(_analysis_to_dict(analysis))
+
+        bundle_references = _resolve_bundle_references(successful_analyses)
         return SemanticAnalysisBundleDTO(
             root_path=str(Path(command.root_path).expanduser().resolve()),
-            document_count=len(analyses),
+            document_count=len(documents),
             payload={
                 "root_path": str(Path(command.root_path).expanduser().resolve()),
-                "document_count": len(analyses),
-                "documents": [_analysis_to_dict(analysis) for analysis in analyses],
+                "document_count": len(documents),
+                "success_count": len(successful_analyses),
+                "failure_count": failure_count,
+                "documents": documents,
+                "bundle_references": bundle_references,
             },
         )
 
@@ -112,3 +144,113 @@ def _analysis_to_dict(analysis: SemanticAnalysis) -> dict[str, object]:
             for function in analysis.functions
         ],
     }
+
+
+def _resolve_bundle_references(analyses: list[SemanticAnalysis]) -> list[dict[str, Any]]:
+    bundle_refs: list[dict[str, Any]] = []
+    export_docs = [_analysis_to_dict(analysis) for analysis in analyses]
+    symbol_by_name: dict[str, list[dict[str, object]]] = {}
+    module_symbol_index: dict[str, dict[str, dict[str, object]]] = {}
+
+    for document in export_docs:
+        module_name = Path(str(document["source_location"])).stem
+        current_module_symbols: dict[str, dict[str, object]] = {}
+        for symbol in document["symbols"]:
+            symbol_by_name.setdefault(str(symbol["name"]), []).append(symbol)
+            current_module_symbols[str(symbol["name"])] = symbol
+            if symbol["container"]:
+                qualified_name = f'{symbol["container"]}.{symbol["name"]}'
+                symbol_by_name.setdefault(qualified_name, []).append(symbol)
+        module_symbol_index[module_name] = current_module_symbols
+
+    for document in export_docs:
+        source_location = str(document["source_location"])
+        local_import_targets = {
+            str(symbol["name"]): symbol["symbol_id"]
+            for symbol in document["symbols"]
+            if symbol["kind"] == "import"
+        }
+
+        for reference in document["references"]:
+            target_id = str(reference["target_id"])
+            resolved_target = None
+            relationship = "resolves_to"
+
+            if "." in target_id:
+                module_name, imported_name = target_id.rsplit(".", 1)
+                resolved_target = module_symbol_index.get(module_name, {}).get(imported_name)
+                if resolved_target is not None:
+                    relationship = "imports_local"
+            if resolved_target is None:
+                candidates = symbol_by_name.get(target_id, [])
+                if len(candidates) == 1:
+                    resolved_target = candidates[0]
+
+            if resolved_target is not None:
+                bundle_refs.append(
+                    {
+                        "source_id": reference["source_id"],
+                        "target_id": resolved_target["symbol_id"],
+                        "relationship": relationship,
+                        "location": source_location,
+                        "line": reference["line"],
+                        "column": reference["column"],
+                    }
+                )
+
+        for function in document["functions"]:
+            source_id = None
+            for symbol in document["symbols"]:
+                qualified_name = (
+                    f'{symbol["container"]}.{symbol["name"]}' if symbol["container"] else symbol["name"]
+                )
+                if qualified_name == function["qualified_name"]:
+                    source_id = symbol["symbol_id"]
+                    break
+            if source_id is None:
+                continue
+
+            for call in function["outbound_calls"]:
+                imported_source = local_import_targets.get(call)
+                if imported_source is not None:
+                    bundle_refs.append(
+                        {
+                            "source_id": source_id,
+                            "target_id": imported_source,
+                            "relationship": "calls_import",
+                            "location": source_location,
+                            "line": function["line"],
+                            "column": 0,
+                        }
+                    )
+                    continue
+
+                candidates = symbol_by_name.get(call, [])
+                if len(candidates) == 1:
+                    bundle_refs.append(
+                        {
+                            "source_id": source_id,
+                            "target_id": candidates[0]["symbol_id"],
+                            "relationship": "calls_resolved",
+                            "location": source_location,
+                            "line": function["line"],
+                            "column": 0,
+                        }
+                    )
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str, int, int]] = set()
+    for reference in bundle_refs:
+        key = (
+            str(reference["source_id"]),
+            str(reference["target_id"]),
+            str(reference["relationship"]),
+            str(reference["location"]),
+            int(reference["line"]),
+            int(reference["column"]),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(reference)
+    return deduped

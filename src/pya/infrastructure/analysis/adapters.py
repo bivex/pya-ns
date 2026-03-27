@@ -28,6 +28,20 @@ def to_cytoscape(payload: dict[str, object]) -> dict[str, object]:
                     }
                 }
             )
+    for reference in payload.get("bundle_references", []):
+        edges.append(
+            {
+                "data": {
+                    "id": f'{reference["source_id"]}->{reference["target_id"]}:{reference["relationship"]}',
+                    "source": reference["source_id"],
+                    "target": reference["target_id"],
+                    "relationship": reference["relationship"],
+                    "location": reference["location"],
+                    "line": reference["line"],
+                    "column": reference["column"],
+                }
+            }
+        )
     return {"nodes": nodes, "edges": edges}
 
 
@@ -48,6 +62,11 @@ def to_graphviz_dot(payload: dict[str, object]) -> str:
             target_id = _dot_escape(reference["target_id"])
             relationship = _dot_escape(reference["relationship"])
             lines.append(f'  "{source_id}" -> "{target_id}" [label="{relationship}"];')
+    for reference in payload.get("bundle_references", []):
+        source_id = _dot_escape(reference["source_id"])
+        target_id = _dot_escape(reference["target_id"])
+        relationship = _dot_escape(reference["relationship"])
+        lines.append(f'  "{source_id}" -> "{target_id}" [label="{relationship}"];')
     lines.append("}")
     return "\n".join(lines)
 
