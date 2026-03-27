@@ -7,3 +7,4 @@ __pycache__/
 build/
 dist/
 src/swifta/infrastructure/antlr/generated/swift5/
+/.pya-cache
