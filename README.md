@@ -55,7 +55,6 @@ Today the system supports:
   * building diagram bundles for entire directories with index page
   * classic NS rendering with SVG triangles for if-blocks
   * depth-coded nested ifs (up to 50 levels with color cycling and Unicode badges ①-㊿)
-  * classic case block structure with side-by-side columns
   * dark Tokyo Night-inspired theme with JetBrains Mono font
   * proper text wrapping and responsive layout
 
@@ -68,7 +67,6 @@ The Nassi-Shneiderman diagrams include:
 
 * **Visual clarity**
   * Classic NS triangles for if-blocks with Yes/No labels
-  * Horizontal dividers for case blocks with side-by-side columns
   * Color-coded block types (loops=blue, try/except=orange, with=teal, etc.)
   * JetBrains Mono monospace font for code readability
 
