@@ -47,9 +47,9 @@ This roadmap reflects the actual state of the Python implementation in this repo
 
 These areas are present, but not fully aligned with what the vendored ANTLR grammar could theoretically support.
 
-* `🟡` `match`/`case` no longer hard-crashes the generated parser path, but complex files can still produce ANTLR diagnostics, so control-flow extraction intentionally falls back to AST when the parse is noisy.
-* `🟡` Cross-file resolution now covers local calls, straightforward imports, alias imports, relative imports, `star imports`, `__all__`-guarded wildcard imports, and package re-exports, but it is still heuristic rather than a full binder.
-* `🟡` Type inference now covers literals, annotations, local call-chain propagation, and simple call-based guesses, but it is still far from full static analysis.
+* `🟡` `match`/`case` is now stable on the generated ANTLR path for the project fixtures and current example tour, including complex pattern shapes, but control-flow extraction still intentionally falls back to AST when ANTLR reports noisy diagnostics on harder files.
+* `🟡` Cross-file resolution now covers local calls, straightforward imports, alias imports, relative imports, dotted module-chain calls such as `pkg.tooling.func()`, `star imports`, `__all__`-guarded wildcard imports, and package re-exports, but it is still heuristic rather than a full binder.
+* `🟡` Type inference now covers literals, annotations, local bindings, local call-chain propagation, imported call-chain propagation in `analyze-dir`, and simple call-based guesses, but it is still far from full static analysis.
 
 ## Not Ready Yet
 

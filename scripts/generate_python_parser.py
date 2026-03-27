@@ -144,7 +144,7 @@ class Python3LexerBase(Lexer):
             return
 
         if next_char in (10, 13, 35):
-            if not previous_was_layout:
+            if not previous_was_layout and not (self._indents and not spaces):
                 self._emit_token(self._common_token(self.NEWLINE, new_line))
             self.skip()
             return
