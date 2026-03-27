@@ -33,6 +33,7 @@ class AstPythonSemanticAnalyzer(PythonSemanticAnalyzer):
             symbols=tuple(visitor.symbols),
             references=tuple(visitor.references),
             functions=tuple(visitor.semantic_functions()),
+            module_exports=tuple(visitor.module_exports()),
         )
 
 
@@ -47,6 +48,8 @@ class _SemanticVisitor(ast.NodeVisitor):
         self._returns: dict[str, list[str]] = defaultdict(list)
         self._calls: dict[str, list[str]] = defaultdict(list)
         self._symbol_ids: dict[str, str] = {}
+        self._module_exports: list[str] = []
+        self._declared_returns: dict[str, str] = {}
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
@@ -145,7 +148,7 @@ class _SemanticVisitor(ast.NodeVisitor):
 
     def visit_Assign(self, node: ast.Assign) -> None:
         if self._function_stack:
-            inferred = _infer_type(node.value)
+            inferred = self._infer_type(node.value)
             for target in node.targets:
                 if isinstance(target, ast.Name) and inferred:
                     self._bindings[self._function_stack[-1].qualified_name].append(
@@ -157,6 +160,8 @@ class _SemanticVisitor(ast.NodeVisitor):
                     )
         elif len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             target = node.targets[0]
+            if target.id == "__all__":
+                self._module_exports = _literal_string_collection(node.value)
             symbol_id = self._make_symbol_id(None, target.id, "variable")
             self._symbol_ids[f"var:{target.id}"] = symbol_id
             self.symbols.append(
@@ -184,6 +189,8 @@ class _SemanticVisitor(ast.NodeVisitor):
                     )
                 )
             else:
+                if node.target.id == "__all__" and node.value is not None:
+                    self._module_exports = _literal_string_collection(node.value)
                 symbol_id = self._make_symbol_id(None, node.target.id, "variable")
                 self._symbol_ids[f"var:{node.target.id}"] = symbol_id
                 self.symbols.append(
@@ -201,7 +208,7 @@ class _SemanticVisitor(ast.NodeVisitor):
 
     def visit_Return(self, node: ast.Return) -> None:
         if self._function_stack:
-            inferred = _infer_type(node.value) if node.value else "None"
+            inferred = self._infer_type(node.value) if node.value else "None"
             if inferred:
                 self._returns[self._function_stack[-1].qualified_name].append(inferred)
         self.generic_visit(node)
@@ -212,12 +219,13 @@ class _SemanticVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def semantic_functions(self) -> list[SemanticFunction]:
+        resolved_returns = self._resolved_return_types()
         items: list[SemanticFunction] = []
         for symbol in self.symbols:
             if symbol.kind not in {"function", "async_function"}:
                 continue
             qualified_name = _join_container(symbol.container, symbol.name)
-            return_type = _merge_inferred_types(self._returns.get(qualified_name, []))
+            return_type = resolved_returns.get(qualified_name)
             items.append(
                 SemanticFunction(
                     qualified_name=qualified_name,
@@ -230,9 +238,39 @@ class _SemanticVisitor(ast.NodeVisitor):
             )
         return items
 
+    def module_exports(self) -> list[str]:
+        return list(dict.fromkeys(self._module_exports))
+
+    def _infer_type(self, node: ast.AST | None) -> str | None:
+        return _infer_type(node, declared_returns=self._declared_returns)
+
+    def _resolved_return_types(self) -> dict[str, str | None]:
+        resolved = {
+            qualified_name: _merge_inferred_types(items)
+            for qualified_name, items in self._returns.items()
+        }
+        for qualified_name, annotation in self._declared_returns.items():
+            resolved.setdefault(qualified_name, annotation)
+
+        changed = True
+        while changed:
+            changed = False
+            for qualified_name, items in self._returns.items():
+                expanded = [
+                    resolved.get(item) or self._declared_returns.get(item) or item
+                    for item in items
+                ]
+                merged = _merge_inferred_types(expanded)
+                if merged != resolved.get(qualified_name):
+                    resolved[qualified_name] = merged
+                    changed = True
+        return resolved
+
     def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef, *, is_async: bool) -> None:
         qualified_name = self._qualify(node.name)
         kind = "async_function" if is_async else "function"
+        if node.returns is not None:
+            self._declared_returns[qualified_name] = _expr_text(node.returns)
         symbol_id = self._make_symbol_id(self._container(), node.name, kind)
         self._symbol_ids[f"func:{qualified_name}"] = symbol_id
         signature_prefix = "async def" if is_async else "def"
@@ -307,7 +345,11 @@ def _expr_text(node: ast.AST | None) -> str:
     return ast.unparse(node)
 
 
-def _infer_type(node: ast.AST | None) -> str | None:
+def _infer_type(
+    node: ast.AST | None,
+    *,
+    declared_returns: dict[str, str] | None = None,
+) -> str | None:
     if node is None:
         return "None"
     if isinstance(node, ast.Constant):
@@ -329,16 +371,16 @@ def _infer_type(node: ast.AST | None) -> str | None:
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
         return "bool"
     if isinstance(node, ast.Await):
-        return _infer_type(node.value)
+        return _infer_type(node.value, declared_returns=declared_returns)
     if isinstance(node, ast.IfExp):
-        left = _infer_type(node.body)
-        right = _infer_type(node.orelse)
+        left = _infer_type(node.body, declared_returns=declared_returns)
+        right = _infer_type(node.orelse, declared_returns=declared_returns)
         if left and right:
             return left if left == right else f"{left} | {right}"
         return left or right
     if isinstance(node, ast.BinOp):
-        left = _infer_type(node.left)
-        right = _infer_type(node.right)
+        left = _infer_type(node.left, declared_returns=declared_returns)
+        right = _infer_type(node.right, declared_returns=declared_returns)
         if left == right and left in {"int", "float", "str"}:
             return left
         if {left, right} == {"int", "float"}:
@@ -347,6 +389,16 @@ def _infer_type(node: ast.AST | None) -> str | None:
         callee = _expr_text(node.func)
         if callee in {"int", "float", "str", "bool", "list", "dict", "set", "tuple"}:
             return callee
+        if declared_returns:
+            if callee in declared_returns:
+                return declared_returns[callee]
+            simple_matches = {
+                return_type
+                for qualified_name, return_type in declared_returns.items()
+                if qualified_name.rsplit(".", 1)[-1] == callee
+            }
+            if len(simple_matches) == 1:
+                return next(iter(simple_matches))
         return callee
     return None
 
@@ -358,6 +410,15 @@ def _merge_inferred_types(items: list[str]) -> str | None:
     if len(kinds) == 1:
         return kinds[0]
     return " | ".join(kinds)
+
+
+def _literal_string_collection(node: ast.AST) -> list[str]:
+    values: list[str] = []
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        for item in node.elts:
+            if isinstance(item, ast.Constant) and isinstance(item.value, str):
+                values.append(item.value)
+    return values
 
 
 def _join_container(container: str | None, name: str) -> str:

@@ -37,9 +37,9 @@ This roadmap reflects the actual state of the Python implementation in this repo
 
 * `✅` Export diagrams as HTML, Mermaid, SVG, and PNG when a rasterizer is available
 * `✅` Export symbol graph and cross-reference data
-* `✅` Run lightweight semantic passes for inferred return types, local bindings, and outbound calls
+* `✅` Run lightweight semantic passes for inferred return types, return annotations, local call-chain propagation, local bindings, and outbound calls
 * `✅` Surface parser diagnostics and parse metadata in semantic analysis exports
-* `✅` Resolve bundle-level local calls, direct imports, alias imports, relative imports, star imports, and package re-exports for straightforward project layouts
+* `✅` Resolve bundle-level local calls, direct imports, alias imports, relative imports, `star imports`, `__all__`-guarded wildcard imports, and package re-exports for straightforward project layouts
 * `✅` Expose adapters for JSON, Cytoscape, and Graphviz DOT
 * `✅` Support content-addressed parse caching
 
@@ -48,8 +48,8 @@ This roadmap reflects the actual state of the Python implementation in this repo
 These areas are present, but not fully aligned with what the vendored ANTLR grammar could theoretically support.
 
 * `🟡` `match`/`case` no longer hard-crashes the generated parser path, but complex files can still produce ANTLR diagnostics, so control-flow extraction intentionally falls back to AST when the parse is noisy.
-* `🟡` Cross-file resolution now covers local calls, straightforward imports, alias imports, relative imports, star imports, and package re-exports, but it is still heuristic rather than a full binder.
-* `🟡` Type inference still focuses on literals, annotations, and simple call-based guesses.
+* `🟡` Cross-file resolution now covers local calls, straightforward imports, alias imports, relative imports, `star imports`, `__all__`-guarded wildcard imports, and package re-exports, but it is still heuristic rather than a full binder.
+* `🟡` Type inference now covers literals, annotations, local call-chain propagation, and simple call-based guesses, but it is still far from full static analysis.
 
 ## Not Ready Yet
 

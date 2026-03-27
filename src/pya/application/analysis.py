@@ -165,6 +165,7 @@ def _analysis_to_dict(
             }
             for function in analysis.functions
         ],
+        "module_exports": list(analysis.module_exports),
     }
 
 
@@ -241,11 +242,13 @@ def _resolve_bundle_references(
     module_symbol_index: dict[str, dict[str, dict[str, object]]] = {}
     module_paths: dict[str, str] = {}
     import_target_by_symbol_id: dict[str, str] = {}
+    module_exports_index: dict[str, set[str]] = {}
 
     for document in export_docs:
         module_name = _module_name_from_location(str(document["source_location"]), root_path)
         current_module_symbols: dict[str, dict[str, object]] = {}
         module_paths[module_name] = str(document["source_location"])
+        module_exports_index[module_name] = {str(name) for name in document.get("module_exports", [])}
         for symbol in document["symbols"]:
             symbol_by_id[str(symbol["symbol_id"])] = symbol
             symbol_by_name.setdefault(str(symbol["name"]), []).append(symbol)
@@ -435,6 +438,7 @@ def _resolve_bundle_references(
                 wildcard_resolved = _resolve_from_wildcard_imports(
                     call,
                     wildcard_modules=wildcard_import_targets,
+                    module_exports_index=module_exports_index,
                     module_symbol_index=module_symbol_index,
                     symbol_by_name=symbol_by_name,
                     symbol_by_qualified_name=symbol_by_qualified_name,
@@ -489,6 +493,9 @@ def _resolve_bundle_references(
                             }
                         )
                         continue
+
+                if wildcard_import_targets and "." not in call:
+                    continue
 
                 candidates = symbol_by_name.get(call, [])
                 if len(candidates) == 1:
@@ -584,6 +591,7 @@ def _resolve_from_wildcard_imports(
     symbol_name: str,
     *,
     wildcard_modules: list[str],
+    module_exports_index: dict[str, set[str]],
     module_symbol_index: dict[str, dict[str, dict[str, object]]],
     symbol_by_name: dict[str, list[dict[str, object]]],
     symbol_by_qualified_name: dict[str, list[dict[str, object]]],
@@ -592,6 +600,9 @@ def _resolve_from_wildcard_imports(
 ) -> dict[str, object] | None:
     candidates: list[dict[str, object]] = []
     for module_name in wildcard_modules:
+        allowed_exports = module_exports_index.get(module_name, set())
+        if allowed_exports and symbol_name not in allowed_exports:
+            continue
         resolved = _resolve_symbol_target(
             f"{module_name}.{symbol_name}",
             module_symbol_index=module_symbol_index,

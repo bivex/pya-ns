@@ -385,3 +385,188 @@ def test_analysis_dir_resolves_star_imports_when_unambiguous(tmp_path: Path) -> 
     ]
     assert len(star_refs) == 1
     assert "pkg/helpers.py::function::exported_via_star" in star_refs[0]["target_id"]
+
+
+def test_analysis_dir_respects___all___for_star_import_resolution(tmp_path: Path) -> None:
+    pkg_dir = tmp_path / "pkg"
+    pkg_dir.mkdir()
+    (pkg_dir / "__init__.py").write_text("", encoding="utf-8")
+    (pkg_dir / "helpers.py").write_text(
+        "\n".join(
+            [
+                '__all__ = ["public_api"]',
+                "",
+                "def public_api() -> str:",
+                '    return "public"',
+                "",
+                "def hidden_api() -> str:",
+                '    return "hidden"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "consumer.py").write_text(
+        "\n".join(
+            [
+                "from pkg.helpers import *",
+                "",
+                "def run() -> str:",
+                "    return public_api()",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "pya",
+            "analyze-dir",
+            str(tmp_path),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    star_refs = [
+        reference
+        for reference in payload["bundle_references"]
+        if reference["relationship"] == "calls_import_star"
+    ]
+    assert len(star_refs) == 1
+    assert "pkg/helpers.py::function::public_api" in star_refs[0]["target_id"]
+
+
+def test_analysis_dir_does_not_resolve_star_import_name_outside___all__(tmp_path: Path) -> None:
+    pkg_dir = tmp_path / "pkg"
+    pkg_dir.mkdir()
+    (pkg_dir / "__init__.py").write_text("", encoding="utf-8")
+    (pkg_dir / "helpers.py").write_text(
+        "\n".join(
+            [
+                '__all__ = ["public_api"]',
+                "",
+                "def public_api() -> str:",
+                '    return "public"',
+                "",
+                "def hidden_api() -> str:",
+                '    return "hidden"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "consumer.py").write_text(
+        "\n".join(
+            [
+                "from pkg.helpers import *",
+                "",
+                "def run() -> str:",
+                "    return hidden_api()",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "pya",
+            "analyze-dir",
+            str(tmp_path),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    run_refs = [
+        reference
+        for reference in payload["bundle_references"]
+        if "consumer.py::function::run" in reference["source_id"]
+    ]
+    assert not any(reference["relationship"] == "calls_import_star" for reference in run_refs)
+
+
+def test_analysis_file_uses_return_annotations_for_local_call_inference(tmp_path: Path) -> None:
+    source_path = tmp_path / "typed_calls.py"
+    source_path.write_text(
+        "\n".join(
+            [
+                "def make_label() -> str:",
+                '    return "label"',
+                "",
+                "def run() -> str:",
+                "    return make_label()",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "pya",
+            "analyze-file",
+            str(source_path),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    functions = {function["qualified_name"]: function for function in payload["functions"]}
+    assert functions["make_label"]["inferred_return_type"] == "str"
+    assert functions["run"]["inferred_return_type"] == "str"
+
+
+def test_analysis_file_propagates_local_call_chain_return_types(tmp_path: Path) -> None:
+    source_path = tmp_path / "chained_calls.py"
+    source_path.write_text(
+        "\n".join(
+            [
+                "def leaf() -> int:",
+                "    return 7",
+                "",
+                "def middle():",
+                "    return leaf()",
+                "",
+                "def top():",
+                "    return middle()",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "pya",
+            "analyze-file",
+            str(source_path),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    functions = {function["qualified_name"]: function for function in payload["functions"]}
+    assert functions["leaf"]["inferred_return_type"] == "int"
+    assert functions["middle"]["inferred_return_type"] == "int"
+    assert functions["top"]["inferred_return_type"] == "int"

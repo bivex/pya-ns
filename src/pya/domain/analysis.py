@@ -50,4 +50,4 @@ class SemanticAnalysis:
     symbols: tuple[SymbolNode, ...]
     references: tuple[SymbolReference, ...]
     functions: tuple[SemanticFunction, ...]
-
+    module_exports: tuple[str, ...] = ()
