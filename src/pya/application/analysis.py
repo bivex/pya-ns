@@ -79,6 +79,7 @@ class SemanticAnalysisService:
 
         resolved_root_path = str(Path(command.root_path).expanduser().resolve())
         bundle_references = _resolve_bundle_references(successful_analyses, resolved_root_path)
+        documents = _propagate_bundle_return_types(documents, resolved_root_path)
         return SemanticAnalysisBundleDTO(
             root_path=resolved_root_path,
             document_count=len(documents),
@@ -228,6 +229,189 @@ def _diagnostic_to_dict(diagnostic: SyntaxDiagnostic) -> dict[str, object]:
         "line": diagnostic.line,
         "column": diagnostic.column,
     }
+
+
+def _resolve_return_type_part(
+    *,
+    part: str,
+    import_targets_by_name: dict[str, str],
+    local_function_symbols: dict[str, str],
+    module_symbol_index: dict[str, dict[str, dict[str, object]]],
+    symbol_by_name: dict[str, list[dict[str, object]]],
+    symbol_by_qualified_name: dict[str, list[dict[str, object]]],
+    symbol_by_id: dict[str, dict[str, object]],
+    import_target_by_symbol_id: dict[str, str],
+    function_payload_by_symbol_id: dict[str, dict[str, object]],
+) -> str | None:
+    if not part or any(token in part for token in ("[", "]", "{", "}", "(", ")", " ")):
+        return None
+    if part in {"None", "bool", "int", "float", "str", "list", "dict", "set", "tuple", "Path"}:
+        return None
+
+    target_symbol_id = local_function_symbols.get(part)
+    if target_symbol_id is None and part in import_targets_by_name and import_targets_by_name[part]:
+        resolved = _resolve_symbol_target(
+            import_targets_by_name[part],
+            module_symbol_index=module_symbol_index,
+            symbol_by_name=symbol_by_name,
+            symbol_by_qualified_name=symbol_by_qualified_name,
+            symbol_by_id=symbol_by_id,
+            import_target_by_symbol_id=import_target_by_symbol_id,
+        )
+        target_symbol_id = str(resolved["symbol_id"]) if resolved is not None else None
+    if target_symbol_id is None and "." in part:
+        import_alias, _, member_name = part.partition(".")
+        alias_target = import_targets_by_name.get(import_alias, "")
+        if alias_target:
+            resolved = _resolve_symbol_target(
+                f"{alias_target}.{member_name}",
+                module_symbol_index=module_symbol_index,
+                symbol_by_name=symbol_by_name,
+                symbol_by_qualified_name=symbol_by_qualified_name,
+                symbol_by_id=symbol_by_id,
+                import_target_by_symbol_id=import_target_by_symbol_id,
+            )
+            target_symbol_id = str(resolved["symbol_id"]) if resolved is not None else None
+
+    if target_symbol_id is None:
+        return None
+
+    target_function = function_payload_by_symbol_id.get(target_symbol_id)
+    target_type = (
+        str(target_function["inferred_return_type"])
+        if target_function and target_function.get("inferred_return_type")
+        else None
+    )
+    if not target_type or target_type == part:
+        return None
+    return target_type
+
+
+def _merge_type_parts(parts: list[str]) -> str:
+    ordered: list[str] = []
+    for part in parts:
+        normalized = part.strip()
+        if not normalized or normalized in ordered:
+            continue
+        ordered.append(normalized)
+    if not ordered:
+        return ""
+    if len(ordered) == 1:
+        return ordered[0]
+    return " | ".join(ordered)
+
+
+def _propagate_bundle_return_types(
+    documents: list[dict[str, object]],
+    root_path: str,
+) -> list[dict[str, object]]:
+    symbol_by_name: dict[str, list[dict[str, object]]] = {}
+    symbol_by_qualified_name: dict[str, list[dict[str, object]]] = {}
+    symbol_by_id: dict[str, dict[str, object]] = {}
+    module_symbol_index: dict[str, dict[str, dict[str, object]]] = {}
+    import_target_by_symbol_id: dict[str, str] = {}
+    function_payload_by_symbol_id: dict[str, dict[str, object]] = {}
+
+    for document in documents:
+        source_location = str(document["source_location"])
+        module_name = _module_name_from_location(source_location, root_path)
+        module_symbols: dict[str, dict[str, object]] = {}
+
+        for symbol in document["symbols"]:
+            symbol_id = str(symbol["symbol_id"])
+            symbol_by_id[symbol_id] = symbol
+            symbol_by_name.setdefault(str(symbol["name"]), []).append(symbol)
+            module_symbols[str(symbol["name"])] = symbol
+            symbol_by_qualified_name.setdefault(
+                f'{module_name}.{symbol["name"]}',
+                [],
+            ).append(symbol)
+            if symbol["container"]:
+                qualified_name = f'{symbol["container"]}.{symbol["name"]}'
+                symbol_by_name.setdefault(qualified_name, []).append(symbol)
+                symbol_by_qualified_name.setdefault(
+                    f"{module_name}.{qualified_name}",
+                    [],
+                ).append(symbol)
+        module_symbol_index[module_name] = module_symbols
+
+        for reference in document["references"]:
+            if str(reference["relationship"]) == "imports":
+                import_target_by_symbol_id[str(reference["source_id"])] = str(reference["target_id"])
+
+        symbol_id_by_function_name: dict[str, str] = {}
+        for symbol in document["symbols"]:
+            if str(symbol["kind"]) not in {"function", "async_function"}:
+                continue
+            qualified_name = (
+                f'{symbol["container"]}.{symbol["name"]}' if symbol["container"] else str(symbol["name"])
+            )
+            symbol_id_by_function_name[qualified_name] = str(symbol["symbol_id"])
+
+        for function in document["functions"]:
+            symbol_id = symbol_id_by_function_name.get(str(function["qualified_name"]))
+            if symbol_id:
+                function_payload_by_symbol_id[symbol_id] = function
+
+    changed = True
+    while changed:
+        changed = False
+        for document in documents:
+            source_location = str(document["source_location"])
+            source_module = _module_name_from_location(source_location, root_path)
+            import_targets_by_name = {
+                str(symbol["name"]): _normalize_target_id(
+                    next(
+                        (
+                            str(reference["target_id"])
+                            for reference in document["references"]
+                            if str(reference["source_id"]) == str(symbol["symbol_id"])
+                            and str(reference["relationship"]) == "imports"
+                        ),
+                        "",
+                    ),
+                    source_module=source_module,
+                    source_location=source_location,
+                )
+                for symbol in document["symbols"]
+                if str(symbol["kind"]) == "import"
+            }
+            local_function_symbols = {
+                (
+                    f'{symbol["container"]}.{symbol["name"]}'
+                    if symbol["container"]
+                    else str(symbol["name"])
+                ): str(symbol["symbol_id"])
+                for symbol in document["symbols"]
+                if str(symbol["kind"]) in {"function", "async_function"}
+            }
+
+            for function in document["functions"]:
+                current_type = function.get("inferred_return_type")
+                if not isinstance(current_type, str) or not current_type.strip():
+                    continue
+                parts = [part.strip() for part in current_type.split("|")]
+                updated_parts: list[str] = []
+                part_changed = False
+                for part in parts:
+                    replacement = _resolve_return_type_part(
+                        part=part,
+                        import_targets_by_name=import_targets_by_name,
+                        local_function_symbols=local_function_symbols,
+                        module_symbol_index=module_symbol_index,
+                        symbol_by_name=symbol_by_name,
+                        symbol_by_qualified_name=symbol_by_qualified_name,
+                        symbol_by_id=symbol_by_id,
+                        import_target_by_symbol_id=import_target_by_symbol_id,
+                        function_payload_by_symbol_id=function_payload_by_symbol_id,
+                    )
+                    updated_parts.append(replacement or part)
+                    part_changed = part_changed or replacement is not None
+                merged = _merge_type_parts(updated_parts)
+                if part_changed and merged != current_type:
+                    function["inferred_return_type"] = merged
+                    changed = True
+    return documents
 
 
 def _resolve_bundle_references(

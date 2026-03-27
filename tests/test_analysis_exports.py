@@ -168,6 +168,36 @@ def test_analysis_file_infers_common_python_types() -> None:
     assert functions["helper_label"]["inferred_return_type"] == "str"
 
 
+def test_analysis_dir_propagates_imported_return_types_into_function_results() -> None:
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "pya",
+            "analyze-dir",
+            str(ROOT / "examples"),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    feature_tour_doc = next(
+        document
+        for document in payload["documents"]
+        if document["source_location"].endswith("examples/feature_tour.py")
+    )
+    functions = {
+        function["qualified_name"]: function
+        for function in feature_tour_doc["functions"]
+    }
+    assert functions["evaluate_workspace"]["inferred_return_type"] == "str"
+    assert functions["feature_tour"]["inferred_return_type"] == "str"
+
+
 def test_analysis_dir_resolves_package_reexports_and_prefers_local_calls(tmp_path: Path) -> None:
     pkg_dir = tmp_path / "pkg"
     pkg_dir.mkdir()
