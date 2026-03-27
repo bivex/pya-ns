@@ -149,14 +149,6 @@ async def mark_async_boundary(label: str) -> None:
     print(f"async:{label}")
 
 
-def imported_status_banner(config: TourConfig):
-    return summarize_workspace(config.workspace_name, support_tools.helper_label("tour"))
-
-
-def packaged_status_banner(config: TourConfig):
-    return summarize_package(imported_status_banner(config))
-
-
 def evaluate_workspace(config: TourConfig) -> str:
     match config.workspace_name:
         case "hidden-workspace":
@@ -166,6 +158,14 @@ def evaluate_workspace(config: TourConfig) -> str:
         case _:
             base = summarize_workspace(config.workspace_name, resilient_summary(config))
             return summarize_package(base)
+
+
+def helper_banner(config: TourConfig):
+    return summarize_workspace(config.workspace_name, support_tools.helper_label("tour"))
+
+
+def package_banner(config: TourConfig):
+    return summarize_package(helper_banner(config))
 
 
 def feature_tour(root: Path) -> str:
